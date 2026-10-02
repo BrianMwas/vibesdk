@@ -1,4 +1,5 @@
 import type { PreviewType } from "../../../services/sandbox/sandboxTypes";
+import type { EmbedderContext } from '../../../agents/core/embedder-context';
 import type { ImageAttachment } from '../../../types/image-attachment';
 import type { BehaviorType, ProjectType } from '../../../agents/core/types';
 import type { CredentialsPayload } from '../../../agents/inferutils/config.types';
@@ -13,6 +14,8 @@ export interface CodeGenArgs {
     behaviorType?: BehaviorType;
     projectType?: ProjectType;
     images?: ImageAttachment[];
+    /** Instructions, skills, seed files and a deployment name from an embedding platform. Think behavior only. */
+    embedderContext?: EmbedderContext;
 
     /** Optional ephemeral credentials (BYOK / gateway override) for sdk */
     credentials?: CredentialsPayload;

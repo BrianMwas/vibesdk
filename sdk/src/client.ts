@@ -50,6 +50,7 @@ export class VibeClient {
 			behaviorType: options.behaviorType,
 			projectType: options.projectType,
 			images: options.images,
+			embedderContext: options.embedderContext,
 			credentials: options.credentials,
 		};
 

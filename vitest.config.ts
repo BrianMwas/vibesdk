@@ -22,6 +22,7 @@ export default defineWorkersConfig({
             '@cloudflare/sandbox',
             '@babel/traverse',
             '@babel/types',
+            'turndown',
           ],
         },
       },

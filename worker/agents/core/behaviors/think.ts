@@ -4,6 +4,7 @@ import type { UIMessage } from 'ai';
 import { ThinkState } from '../state';
 import { AgentInitArgs, DeploymentTarget } from '../types';
 import { BaseCodingBehavior } from './base';
+import { renderEmbedderPrompt, toStoredContext } from '../embedder-context';
 import { WebSocketMessageResponses } from '../../constants';
 import { ICodingAgent } from '../../services/interfaces/ICodingAgent';
 import { OperationOptions } from '../../operations/common';
@@ -159,7 +160,7 @@ export class ThinkCodingBehavior
 		await super.initialize(initArgs);
 		// Think projects are template-free: SpaceDO + the agent's own file tools
 		// own scaffolding entirely. We intentionally ignore `templateInfo`.
-		const { query, hostname, inferenceContext, sandboxSessionId } = initArgs;
+		const { query, hostname, inferenceContext, sandboxSessionId, embedderContext } = initArgs;
 
 		const baseName = (query || 'project').toString();
 		const projectName = generateProjectName(
@@ -193,6 +194,7 @@ export class ThinkCodingBehavior
 			behaviorType: 'think',
 			thinkAgentName: agentName,
 			currentBranch: 'main',
+			embedderContext: embedderContext ? toStoredContext(embedderContext) : undefined,
 		});
 
 		const configureStartedAt = performance.now();
@@ -200,7 +202,7 @@ export class ThinkCodingBehavior
 		const configureDurationMs = performance.now() - configureStartedAt;
 
 		const seedStartedAt = performance.now();
-		await this.seedEmptySpace();
+		await this.seedEmptySpace(embedderContext?.seedFiles);
 		const seedDurationMs = performance.now() - seedStartedAt;
 
 		this.logger.info(
@@ -325,6 +327,7 @@ export class ThinkCodingBehavior
 			'2. Then call `get_browser_console_logs` to inspect the running preview for client-side errors (JS exceptions, failed fetches, missing assets, hydration errors).',
 			'3. If the deploy reports build errors or the console shows errors, fix the code and repeat from step 1 until the deploy succeeds and the console is clean.',
 			'A building turn should finish with a successful `deploy_space` and a clean `get_browser_console_logs` check.',
+			...(this.state.embedderContext ? ['', renderEmbedderPrompt(this.state.embedderContext)] : []),
 			'',
 			'## Commits & restore points',
 			'Each commit is a restore point the user can roll back to, and YOU decide when to create them. Use the `commit` tool to snapshot a coherent unit of work with a short, descriptive message (e.g. before a risky refactor, or after finishing a feature). You do not need to `commit` right before `deploy_space` — deploying already commits. Do not commit after every tiny edit; group related changes into meaningful restore points.',
@@ -335,7 +338,7 @@ export class ThinkCodingBehavior
 	 * Bootstrap an empty SpaceDO: write a marker file and commit so the DO is
 	 * instantiated with a `main` branch and a valid HEAD.
 	 */
-	private async seedEmptySpace(): Promise<void> {
+	private async seedEmptySpace(seedFiles?: Record<string, string>): Promise<void> {
 		const marker = JSON.stringify(
 			{ agentId: this.getAgentId(), createdAt: new Date().toISOString(), seededBy: 'vibesdk-think' },
 			null,
@@ -343,6 +346,9 @@ export class ThinkCodingBehavior
 		);
 		try {
 			await this.callSpace((space) => space.writeFile('.think/space.json', marker));
+			for (const [path, content] of Object.entries(seedFiles ?? {})) {
+				await this.callSpace((space) => space.writeFile(path, content));
+			}
 			await this.callSpace((space) => space.gitCommitLocal('chore: initialize think space'));
 		} catch (e) {
 			this.logger.warn('SpaceDO empty-seed failed (continuing)', e);
@@ -1020,7 +1026,8 @@ export class ThinkCodingBehavior
 				apiToken,
 				dispatchNamespace,
 				previewDomain: getPreviewDomain(this.env),
-				appName: this.state.blueprint.title || this.state.projectName || `vibe-${instanceId}`,
+				appName: this.state.embedderContext?.deploymentName
+					?? (this.state.blueprint.title || this.state.projectName || `vibe-${instanceId}`),
 				bundle,
 			});
 			await new AppService(this.env).updateDeploymentId(instanceId, result.deploymentId);
