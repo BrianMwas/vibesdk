@@ -74,4 +74,44 @@ describe('VibeClient.build', () => {
 		expect(calls[0]?.url.endsWith('/api/auth/exchange-api-key')).toBe(true);
 		expect(calls[1]?.url.endsWith('/api/agent')).toBe(true);
 	});
+
+	it('forwards the embedder context so the platform can steer the build', async () => {
+		const embedderContext = {
+			instructions: 'Build a showcase site from the supplied data.',
+			requiredSkills: ['frontend-design'],
+			seedFiles: { 'public/site-data.json': '{}' },
+			deploymentName: 'site-abc',
+		};
+		let sent: Record<string, unknown> = {};
+
+		const { fetchFn } = createFetchMock(async ({ url, init }) => {
+			if (url.endsWith('/api/auth/exchange-api-key')) {
+				return new Response(
+					JSON.stringify({
+						success: true,
+						data: {
+							accessToken: 'ACCESS_TOKEN',
+							expiresIn: 900,
+							expiresAt: new Date(Date.now() + 900_000).toISOString(),
+							apiKeyId: 'k_123',
+							user: { id: 'u_1' },
+						},
+					}),
+					{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				);
+			}
+			if (url.endsWith('/api/agent')) {
+				sent = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+				const start = JSON.stringify({ agentId: 'a1', websocketUrl: 'ws://x/ws', behaviorType: 'think', projectType: 'app' }) + '\n';
+				return new Response(streamFromString(start), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+			}
+			return new Response('not found', { status: 404 });
+		});
+
+		const client = new VibeClient({ baseUrl: 'http://localhost:5173', apiKey: 'API_KEY', fetchFn });
+		await client.build('Build it', { behaviorType: 'think', autoConnect: false, autoGenerate: false, embedderContext });
+
+		expect(sent.embedderContext).toEqual(embedderContext);
+		expect(sent.behaviorType).toBe('think');
+	});
 });
