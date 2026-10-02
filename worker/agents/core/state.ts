@@ -4,6 +4,7 @@ import type { PhasicBlueprint, AgenticBlueprint, PhaseConceptType ,
 } from '../schemas';
 import type { InferenceMetadata } from '../inferutils/config.types';
 import { BehaviorType, Plan, ProjectType } from './types';
+import type { StoredEmbedderContext } from './embedder-context';
 
 export interface FileState extends FileOutputType {
     lastDiff: string;
@@ -136,6 +137,8 @@ export interface ThinkState extends BaseProjectState {
     /** Last commit SHA we successfully deployed. */
     lastDeployedCommit?: string;
     cloudflareDeploymentUrl?: string;
+    /** What the embedding platform asked for; the seed files are not kept. */
+    embedderContext?: StoredEmbedderContext;
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;

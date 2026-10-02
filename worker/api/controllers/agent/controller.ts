@@ -4,6 +4,7 @@ import { generateId } from '../../../utils/idGenerator';
 import { AgentState } from '../../../agents/core/state';
 import { BehaviorType, ProjectType } from '../../../agents/core/types';
 import { getBehaviorTypeForProject } from '../../../agents/core/features';
+import { mayChooseDeploymentName, parseEmbedderContext, type EmbedderContext } from '../../../agents/core/embedder-context';
 import { getAgentStub, getTemplateForQuery } from '../../../agents';
 import {
     AgentConnectionData,
@@ -113,6 +114,22 @@ export class CodingAgentController extends BaseController {
             const behaviorType = resolveBehaviorType(body);
 
             this.logger.info(`Resolved behaviorType: ${behaviorType}, projectType: ${projectType} for agent ${agentId}`);
+
+            let embedderContext: EmbedderContext | undefined;
+            if (body.embedderContext !== undefined) {
+                if (behaviorType !== 'think') {
+                    return CodingAgentController.createErrorResponse('embedderContext requires behaviorType "think"', 400);
+                }
+                const parsed = parseEmbedderContext(body.embedderContext);
+                if (!parsed.ok) {
+                    return CodingAgentController.createErrorResponse(parsed.error, 400);
+                }
+                // The dispatch namespace is shared, so the name decides which Worker is overwritten.
+                if (parsed.value.deploymentName && !mayChooseDeploymentName(user.id, env.EMBEDDER_USER_IDS)) {
+                    return CodingAgentController.createErrorResponse('This account may not choose a deployment name', 403);
+                }
+                embedderContext = parsed.value;
+            }
                                 
             // Fetch all user model configs, api keys and agent instance at once
             const userConfigsRecord = await modelConfigService.getUserModelConfigs(user.id);
@@ -244,6 +261,7 @@ export class CodingAgentController extends BaseController {
                 hostname,
                 inferenceContext,
                 images: uploadedImages,
+                ...(embedderContext ? { embedderContext } : {}),
                 onBlueprintChunk: (chunk: string) => {
                     writer.write({chunk});
                 },
