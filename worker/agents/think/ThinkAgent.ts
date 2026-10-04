@@ -17,6 +17,9 @@ import { selectSystemPrompt, PROMPT_MAX_STEPS } from './prompts';
 import { createThinkSkillSource } from './skills';
 import { createAskQuestionsTool } from './ask-questions-tool';
 import { createBrowserConsoleLogsTool } from './browser-logs-tool';
+import { createSearchImagesTool } from './search-images-tool';
+import { createScaffoldUiKitTool } from './scaffold-ui-kit-tool';
+import { createGetUiBlocksTool } from './get-ui-blocks-tool';
 import { createDeploySpaceTool } from './deploy-tool';
 import { createCommitTool } from './commit-tool';
 import { createSetTitleTool } from './set-title-tool';
@@ -345,6 +348,12 @@ export class ThinkAgent extends Think<Env> {
 				env: this.env,
 				defaultUrl: previewUrl,
 			}),
+			// Real, licensed stock photos for heroes/sections that call for a photo.
+			search_images: createSearchImagesTool({ env: this.env }),
+			// Vendors the precompiled shadcn/ui kit and the React page shell.
+			scaffold_ui_kit: createScaffoldUiKitTool({ ops }),
+			// Ready-made page sections built on the kit's layout primitives.
+			get_ui_blocks: createGetUiBlocksTool(),
 		} as unknown as ToolSet;
 	}
 

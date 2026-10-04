@@ -17,6 +17,9 @@ import FRONTEND_DESIGN from './skills/frontend-design/SKILL.md?raw';
 import FRONTEND_DESIGN_LANDING_PAGE from './skills/frontend-design-landing-page/SKILL.md?raw';
 import FRONTEND_DESIGN_SAAS from './skills/frontend-design-saas/SKILL.md?raw';
 import WEB_DESIGN_GUIDELINES from './skills/web-design-guidelines/SKILL.md?raw';
+import NO_AI_DESIGN_SLOP from './skills/no-ai-design-slop/SKILL.md?raw';
+import AUDIT_AI_DESIGN_SLOP from './skills/audit-ai-design-slop/SKILL.md?raw';
+import PICK_UI_LIBRARY from './skills/pick-ui-library/SKILL.md?raw';
 
 /** Raw `SKILL.md` contents keyed by their source directory name. */
 const RAW_SKILLS: Record<string, string> = {
@@ -26,6 +29,9 @@ const RAW_SKILLS: Record<string, string> = {
 	'frontend-design-saas': FRONTEND_DESIGN_SAAS,
 	'design-archetypes': DESIGN_ARCHETYPES,
 	'web-design-guidelines': WEB_DESIGN_GUIDELINES,
+	'no-ai-design-slop': NO_AI_DESIGN_SLOP,
+	'audit-ai-design-slop': AUDIT_AI_DESIGN_SLOP,
+	'pick-ui-library': PICK_UI_LIBRARY,
 };
 
 function buildEntries(): SkillManifestEntry[] {

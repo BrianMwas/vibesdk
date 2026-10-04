@@ -2,10 +2,12 @@
  * Centralized Authentication Utilities
  */
 
+import { env } from 'cloudflare:workers';
 import type {  AuthUser, SessionResponse } from '../types/auth-types';
 import type { User } from '../database/schema';
 import { createLogger } from '../logger';
 import { SecurityError, SecurityErrorType } from 'shared/types/errors';
+import { isDev } from './envs';
 
 const logger = createLogger('AuthUtils');
 
@@ -177,7 +179,7 @@ export function createSecureCookie(options: CookieOptions): string {
 		name,
 		value,
 		maxAge = 7 * 24 * 60 * 60, // 7 days default
-		secure = true,
+		secure = !isDev(env), // browsers drop Secure cookies set over plain http (local dev)
 		sameSite = 'Lax',
 		path = '/',
 		domain,

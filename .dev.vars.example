@@ -31,6 +31,11 @@
 #OPENROUTER_API_KEY="default" 
 #GROQ_API_KEY="default" 
  
+# Optional: real stock photos for generated sites (Think's `search_images` tool).
+# Free key from https://www.pexels.com/api/. Without it, the agent falls back
+# to typographic/illustrative/CSS-only treatments instead of real photography.
+#PEXELS_API_KEY=""
+
 # Stuff for Oauths:
 #GOOGLE_CLIENT_SECRET=""
 #GOOGLE_CLIENT_ID="" 

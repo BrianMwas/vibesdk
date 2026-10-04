@@ -29,7 +29,7 @@ Aim for interfaces that feel intentional and deliberate.
 - Typography: Use expressive, purposeful fonts and avoid default stacks (Inter, Roboto, Arial, system).
 - Color & Look: Choose a clear visual direction; define CSS variables; avoid purple-on-white defaults. No purple bias or dark mode bias.
 - Motion: Use a few meaningful animations (page-load, staggered reveals) instead of generic micro-motions.
-- Background: Don't rely on flat, single-color backgrounds; use gradients, shapes, or subtle patterns to build atmosphere.
+- Background: Don't rely on flat, single-color backgrounds; build atmosphere with real imagery, shapes, texture, or subtle patterns. Gradients are one option among these, not the default — a gradient wash used as decoration on every section is itself a generic tell, so reach for it only when it is the most deliberate choice for the brief.
 - Overall: Avoid boilerplate layouts and interchangeable UI patterns. Vary themes, type families, and visual languages across outputs.
 - Ensure the page loads properly on both desktop and mobile.
 
