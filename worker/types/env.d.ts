@@ -31,5 +31,6 @@ declare namespace Cloudflare {
 		SANDBOX_SERVICE_URL: string;
 		SENTRY_DSN: string;
 		SERPAPI_KEY: string;
+		THINK_MODEL_ID?: string;
 	}
 }

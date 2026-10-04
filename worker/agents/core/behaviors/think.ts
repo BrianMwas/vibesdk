@@ -28,7 +28,7 @@ import { AppService } from 'worker/database/services/AppService';
 import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
-import { THINK_MODEL_CONFIG, THINK_MODEL_ID } from '../../think/model-config';
+import { resolveThinkModel } from '../../think/model-config';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
@@ -220,8 +220,7 @@ export class ThinkCodingBehavior
 		const inf = this.getInferenceContext();
 		const userId = this.state.metadata.userId;
 
-		const modelName = THINK_MODEL_ID;
-		const aiModelConfig = THINK_MODEL_CONFIG;
+		const { id: modelName, config: aiModelConfig } = resolveThinkModel(this.env);
 
 		let conf: { baseURL: string; apiKey: string; defaultHeaders?: Record<string, string> };
 		try {

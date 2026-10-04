@@ -31,6 +31,14 @@
 #OPENROUTER_API_KEY="default" 
 #GROQ_API_KEY="default" 
  
+# Optional: the model Think builds with, as an AI Gateway model id
+# (`<provider>/<model>`). Unset means google-ai-studio/gemini-3.6-flash.
+# The provider decides which <PROVIDER>_API_KEY is sent, falling back to the
+# gateway token. Start a new app after changing it: an existing app keeps the
+# model it was created with.
+#THINK_MODEL_ID="workers-ai/@cf/moonshotai/kimi-k3"
+#THINK_MODEL_ID="openrouter/moonshotai/kimi-k3"
+
 # Optional: real stock photos for generated sites (Think's `search_images` tool).
 # Free key from https://www.pexels.com/api/. Without it, the agent falls back
 # to typographic/illustrative/CSS-only treatments instead of real photography.
