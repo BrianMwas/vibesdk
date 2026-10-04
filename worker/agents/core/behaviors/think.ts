@@ -29,6 +29,11 @@ import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
 import { resolveThinkModel } from '../../think/model-config';
+import { chooseDesign, type DesignCompletion } from '../../think/design/choose';
+import { DESIGN_FILE_PATH, parseDesignInput, type DesignDirection } from '../../think/design/direction';
+import { designSeedFiles, renderDesignSteps } from '../../think/design/render';
+import { executeInference } from '../../inferutils/infer';
+import { createSystemMessage, createUserMessage } from '../../inferutils/common';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
@@ -96,6 +101,32 @@ class ThinkStreamForwarder extends RpcTarget {
 		this.onErrorCb(error);
 	}
 	onInterrupted(): void {}
+}
+
+/** The frontend steps when no design was decided (the builder chooses the look). */
+const DEFAULT_FRONTEND_STEPS: readonly string[] = [
+	'## Frontend standard (required for anything with a UI)',
+	'The skill catalog is not optional reading. In the first building turn, before writing any frontend file:',
+	'1. Call `activate_skill` for `frontend-design`, `cloudflare-bundler-apps`, `design-archetypes` and `no-ai-design-slop`. Also activate `frontend-design-landing-page` for a marketing, business or landing site, or `frontend-design-saas` for a dashboard or app UI. Their rules override your defaults.',
+	'2. Write the short design plan `frontend-design` asks for (palette as named hex values, typefaces, layout) and check it against the brief before coding.',
+	'3. Call `scaffold_ui_kit` with the site name as `title` and a `theme`, `radius` (sharp, small, default, large, round) and `mode` that fit the plan. If the plan needs its own palette, set the tokens in `public/styles.css` (they override the preset) — never ship the neutral defaults.',
+	'4. Call `get_ui_blocks` once with every section the page needs, in order — e.g. marketing-header, hero-split, feature-grid, pricing, faq, contact, site-footer for a business site; sidebar-07, app-header, dashboard-stats, page-with-tabs, data-table, record-sheet for an app — and build `public/app.jsx` from the returned code. Replace all placeholder content with the real content. Keep the structure: layout comes from `Section`, `Container`, `Stack`, `Grid`, `Inline`, `SectionHeader` and `PageHeader`, not hand-picked padding or widths; menus, dialogs, sheets, tabs and form controls come from the kit, not divs; colors use token classes (`bg-primary`, `text-muted-foreground`), never hex; icons come from `lucide-react`, never emoji. Put top-level app areas in the sidebar, and use tabs only for a few sub-views of one area.',
+	'5. Keep the first screen uncluttered: one headline, one supporting sentence, at most two actions. Hours, address, phone numbers, badges and trust points belong further down or in the footer, not stacked above the fold.',
+	'6. Before the final `deploy_space` of a building turn, activate `audit-ai-design-slop`, list each issue it finds in what you built, and fix them before deploying.',
+	'On later turns, skills you already activated in this conversation stay in effect; activate any you have not used yet when the task calls for them.',
+];
+
+/** How much of the embedder's instructions the design choice reads. */
+const DESIGN_BRIEF_INSTRUCTION_CHARS = 6_000;
+
+/** The embedder's seed files plus the design files; an embedder's own `public/styles.css` wins. */
+function withDesignFiles(
+	seedFiles: Record<string, string> | undefined,
+	direction: DesignDirection | undefined,
+): Record<string, string> | undefined {
+	if (!direction) return seedFiles;
+	const design = designSeedFiles(direction);
+	return { ...design, ...seedFiles, [DESIGN_FILE_PATH]: design[DESIGN_FILE_PATH] };
 }
 
 /**
@@ -197,19 +228,77 @@ export class ThinkCodingBehavior
 			embedderContext: embedderContext ? toStoredContext(embedderContext) : undefined,
 		});
 
+		const designStartedAt = performance.now();
+		const designDirection = await this.decideDesign(query, embedderContext?.seedFiles, embedderContext?.instructions);
+		if (designDirection) this.setState({ ...this.state, designDirection });
+		const designDurationMs = performance.now() - designStartedAt;
+
 		const configureStartedAt = performance.now();
 		await this.configureThinkAgent();
 		const configureDurationMs = performance.now() - configureStartedAt;
 
 		const seedStartedAt = performance.now();
-		await this.seedEmptySpace(embedderContext?.seedFiles);
+		await this.seedEmptySpace(withDesignFiles(embedderContext?.seedFiles, designDirection));
 		const seedDurationMs = performance.now() - seedStartedAt;
 
 		this.logger.info(
 			`Think agent ${this.getAgentId()} initialized (space=${agentName})`,
-			{ configureDurationMs, seedDurationMs },
+			{
+				designDurationMs,
+				configureDurationMs,
+				seedDurationMs,
+				design: designDirection
+					? {
+							source: designDirection.source,
+							kind: designDirection.kind,
+							palette: designDirection.palette.id,
+							fonts: designDirection.fonts.id,
+							radius: designDirection.radius,
+							sections: designDirection.sections,
+						}
+					: null,
+			},
 		);
 		return this.state;
+	}
+
+	/**
+	 * The design the build starts from: the embedder's `design.json` when it
+	 * supplies a valid one, otherwise one chosen for the brief by a fast model
+	 * (the `templateSelection` model) from this app's shortlist. Undefined when
+	 * the request has no conventional UI.
+	 */
+	private async decideDesign(
+		query: string,
+		seedFiles: Record<string, string> | undefined,
+		instructions: string | undefined,
+	): Promise<DesignDirection | undefined> {
+		const supplied = seedFiles?.[DESIGN_FILE_PATH];
+		if (supplied !== undefined) {
+			const parsed = parseDesignInput(supplied);
+			if (parsed.ok) return parsed.direction;
+			this.logger.warn('Ignoring the embedder design.json; choosing a design instead', { error: parsed.error });
+		}
+		const brief = instructions ? `${query}\n\n${instructions.slice(0, DESIGN_BRIEF_INSTRUCTION_CHARS)}` : query;
+		const complete: DesignCompletion = async (prompt, schema) => {
+			const { object } = await executeInference({
+				env: this.env,
+				messages: [createSystemMessage(prompt.system), createUserMessage(prompt.user)],
+				agentActionName: 'templateSelection',
+				schema,
+				context: this.getInferenceContext(),
+				maxTokens: 1500,
+				retryLimit: 1,
+			});
+			return object;
+		};
+		const result = await chooseDesign({
+			brief,
+			seed: this.getAgentId(),
+			complete,
+			onError: (error) => this.logger.warn('Design choice failed; using the fallback look', error),
+		});
+		return result.kind === 'direction' ? result.direction : undefined;
 	}
 
 	/**
@@ -320,15 +409,7 @@ export class ThinkCodingBehavior
 			'3. End your turn after calling `ask_questions`. Do not write/edit files or deploy until the scope is clear or the user tells you to proceed with your assumptions.',
 			'If the request is already clear and specific, skip this and go straight to building.',
 			'',
-			'## Frontend standard (required for anything with a UI)',
-			'The skill catalog is not optional reading. In the first building turn, before writing any frontend file:',
-			'1. Call `activate_skill` for `frontend-design`, `cloudflare-bundler-apps`, `design-archetypes` and `no-ai-design-slop`. Also activate `frontend-design-landing-page` for a marketing, business or landing site, or `frontend-design-saas` for a dashboard or app UI. Their rules override your defaults.',
-			'2. Write the short design plan `frontend-design` asks for (palette as named hex values, typefaces, layout) and check it against the brief before coding.',
-			'3. Call `scaffold_ui_kit` with the site name as `title` and a `theme`, `radius` (sharp, small, default, large, round) and `mode` that fit the plan. If the plan needs its own palette, set the tokens in `public/styles.css` (they override the preset) — never ship the neutral defaults.',
-			'4. Call `get_ui_blocks` once with every section the page needs, in order — e.g. marketing-header, hero-split, feature-grid, pricing, faq, contact, site-footer for a business site; sidebar-07, app-header, dashboard-stats, page-with-tabs, data-table, record-sheet for an app — and build `public/app.jsx` from the returned code. Replace all placeholder content with the real content. Keep the structure: layout comes from `Section`, `Container`, `Stack`, `Grid`, `Inline`, `SectionHeader` and `PageHeader`, not hand-picked padding or widths; menus, dialogs, sheets, tabs and form controls come from the kit, not divs; colors use token classes (`bg-primary`, `text-muted-foreground`), never hex; icons come from `lucide-react`, never emoji. Put top-level app areas in the sidebar, and use tabs only for a few sub-views of one area.',
-			'5. Keep the first screen uncluttered: one headline, one supporting sentence, at most two actions. Hours, address, phone numbers, badges and trust points belong further down or in the footer, not stacked above the fold.',
-			'6. Before the final `deploy_space` of a building turn, activate `audit-ai-design-slop`, list each issue it finds in what you built, and fix them before deploying.',
-			'On later turns, skills you already activated in this conversation stay in effect; activate any you have not used yet when the task calls for them.',
+			...(this.state.designDirection ? renderDesignSteps(this.state.designDirection) : DEFAULT_FRONTEND_STEPS),
 			'',
 			'## Deploy & verify workflow (VibeSDK-specific)',
 			'Once you are actively building (the scope is clear or the user confirmed), this app is previewed on Cloudflare Workers via SpaceDO — there is no shell. In a building turn, do NOT end after only writing files:',

@@ -122,6 +122,30 @@ describe('scaffold_ui_kit tool', () => {
 		expect(UI_KIT_CSS).toContain('.rounded-xl{border-radius:calc(var(--radius)*1.5)}');
 	});
 
+	it('takes radius and mode from a decided design and keeps its stylesheet', async () => {
+		const styles = '/* decided */';
+		const ws = memoryWorkspace({
+			'design.json': JSON.stringify({ palette: 'midnight', fonts: 'manrope', radius: 'round' }),
+			'public/styles.css': styles,
+		});
+		const result = await run(ws.ops, { title: 'Studio' });
+		expect(ws.files.get('public/index.html')).toContain('<html lang="en" data-radius="round" class="dark">');
+		expect(ws.files.get('public/styles.css')).toBe(styles);
+		expect(result.kept_existing).toContain('public/styles.css');
+	});
+
+	it('lets an explicit radius or mode win over the decided design', async () => {
+		const ws = memoryWorkspace({ 'design.json': JSON.stringify({ palette: 'midnight', fonts: 'manrope', radius: 'round' }) });
+		await run(ws.ops, { radius: 'sharp', mode: 'light' });
+		expect(ws.files.get('public/index.html')).toContain('<html lang="en" data-radius="sharp">');
+	});
+
+	it('ignores a design.json it cannot read', async () => {
+		const ws = memoryWorkspace({ 'design.json': '{broken' });
+		await run(ws.ops, {});
+		expect(ws.files.get('public/index.html')).toContain('<html lang="en" data-radius="default">');
+	});
+
 	it('exports the layout primitives used by the blocks', async () => {
 		const kit = await import('./ui-kit/ui-kit.js');
 		for (const name of ['Container', 'Section', 'Stack', 'Inline', 'Grid', 'SectionHeader', 'PageHeader', 'StatCard', 'EmptyState', 'cn']) {

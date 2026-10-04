@@ -26,6 +26,7 @@ import UI_KIT_JS from './ui-kit/ui-kit.js?raw';
 // below) — only this in-repo copy needs the extra extension. Regenerate both
 // via scripts/think-ui-kit/build.sh.
 import UI_KIT_CSS from './ui-kit/ui-kit.css.js?raw';
+import { DESIGN_FILE_PATH, parseDesignInput } from './design/direction';
 
 const UI_KIT_JS_PATH = 'public/vendor/ui-kit.js';
 const UI_KIT_CSS_PATH = 'public/vendor/ui-kit.css';
@@ -147,6 +148,16 @@ const NEXT_STEPS = [
 	'Console warnings "You are using the in-browser Babel transformer" and "cdn.tailwindcss.com should not be used in production" are expected for this setup; do not try to fix them.',
 ];
 
+/** Radius and mode from a decided design (`design.json`) when the call leaves them out. */
+async function withDesignDefaults<T extends Appearance>(ops: Pick<SpaceWorkspaceOps, 'readFile'>, args: T): Promise<T> {
+	if (args.radius && args.mode) return args;
+	const design = await ops.readFile(DESIGN_FILE_PATH);
+	if (design === null) return args;
+	const parsed = parseDesignInput(design);
+	if (!parsed.ok) return args;
+	return { ...args, radius: args.radius ?? parsed.direction.radius, mode: args.mode ?? parsed.direction.mode };
+}
+
 export function createScaffoldUiKitTool(opts: {
 	ops: Pick<SpaceWorkspaceOps, 'writeFile' | 'readFile'>;
 }): Tool {
@@ -159,7 +170,8 @@ export function createScaffoldUiKitTool(opts: {
 			radius: z.enum(RADIUS_NAMES).optional().describe('Corner shape: sharp for square, small, default, large, round.'),
 			mode: z.enum(['light', 'dark']).optional().describe('Light or dark color scheme.'),
 		}),
-		execute: async (args: { title?: string } & Appearance) => {
+		execute: async (requested: { title?: string } & Appearance) => {
+			const args = await withDesignDefaults(ops, requested);
 			await ops.writeFile(UI_KIT_JS_PATH, UI_KIT_JS);
 			await ops.writeFile(UI_KIT_CSS_PATH, UI_KIT_CSS);
 			const written = [UI_KIT_JS_PATH, UI_KIT_CSS_PATH];
