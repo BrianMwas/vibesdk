@@ -32,6 +32,30 @@ describe('get_ui_blocks tool', () => {
 		expect(result.code).not.toMatch(/@\/(registry|components)/);
 	});
 
+	it('merges the motion imports of animated blocks into one line', async () => {
+		const result = await getBlocks(['marketing-header', 'hero-workflow', 'process-steps', 'stats-band', 'faq-topics', 'site-footer']);
+
+		expect(result.ok).toBe(true);
+		const motion = importLine(result.code, 'motion/react');
+		expect(motion).toEqual(expect.arrayContaining(['AnimatePresence', 'MotionConfig', 'animate', 'motion', 'useInView']));
+		expect(new Set(motion).size).toBe(motion.length);
+		expect(result.code.match(/from "motion\/react"/g)).toHaveLength(1);
+		expect((result.next_steps as string[]).join('\n')).toContain('scaffold_ui_kit maps it');
+	});
+
+	it('only mentions motion for blocks that animate', async () => {
+		const result = await getBlocks(['contact']);
+		expect(result.code).not.toContain('motion/react');
+		expect((result.next_steps as string[]).join('\n')).not.toContain('motion/react');
+	});
+
+	it('merges every marketing block into one page without name clashes', async () => {
+		const names = UI_BLOCKS.filter((block) => block.category === 'marketing').map((block) => block.name);
+		const result = await getBlocks(names);
+		expect(result.ok).toBe(true);
+		expect(result.entries).toHaveLength(names.length);
+	});
+
 	it('imports Toaster whenever a block calls toast()', async () => {
 		const result = await getBlocks(['contact']);
 		expect(importLine(result.code, './vendor/ui-kit.js')).toEqual(expect.arrayContaining(['toast', 'Toaster']));

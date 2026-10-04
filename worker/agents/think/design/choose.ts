@@ -27,7 +27,8 @@ Rules:
 - Choose for this specific business and its customers, not for a generic site. The palette and type should suit what is sold and to whom.
 - kind: "website" for a business, marketing, portfolio or landing site; "app" for a dashboard, tool or anything people sign in to use; "other" for games, APIs and anything without a conventional UI.
 - sections (websites only): the page's sections in order, from the listed blocks. Start with marketing-header and one hero, end with site-footer. Use a block only when the page needs it and the request supplies its content: testimonials only when real quotes are given, pricing only when real prices are given. Never pad the page.
-- Pick hero-split when the business has something to show (a product, a place, a result); hero-centered when the offer is a service or an idea.
+- Pick the hero for what the business can show: hero-split for a place, a craft or a physical product a photo can show; hero-product for software, apps and online tools; hero-workflow when the value is in how the work gets done; hero-statement for studios, agencies and firms that sell judgement or taste.
+- Add process-steps when customers need to know what happens after they get in touch, or process-interactive when each step has enough to show on its own. Use stats-band only when the request gives real figures.
 - signature: one sentence naming a single memorable element tied to this business (for example "the menu's daily specials set as a chalkboard-style list"), not a visual effect.`;
 
 function describeOptions(seed: string): { text: string; paletteIds: [string, ...string[]]; fontIds: [string, ...string[]] } {

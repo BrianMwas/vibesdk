@@ -41,6 +41,9 @@ const THEME_TOKENS = [
 	'--border', '--input', '--ring',
 ];
 
+// Animated blocks from get_ui_blocks import "motion/react".
+const MOTION_IMPORT = '"motion/react": "https://esm.sh/motion@14.0.0/react?external=react,react-dom"';
+
 const THEME_NAMES = ['default', ...THEME_PRESETS] as [string, ...string[]];
 const RADIUS_NAMES = RADIUS_PRESETS.map((preset) => preset.name) as [string, ...string[]];
 
@@ -84,7 +87,8 @@ ${renderHtmlTag(appearance)}
     "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
     "react-dom": "https://esm.sh/react-dom@18.3.1",
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "lucide-react": "https://esm.sh/lucide-react@0.525.0?external=react"
+    "lucide-react": "https://esm.sh/lucide-react@0.525.0?external=react",
+    ${MOTION_IMPORT}
   }
 }
 </script>
@@ -101,6 +105,15 @@ ${TAILWIND_RUNTIME_CONFIG}
 </body>
 </html>
 `;
+}
+
+/** Adds motion/react to an import map written before the animated blocks existed, or null when nothing changes. */
+function withMotionImport(html: string): string | null {
+	if (html.includes('"motion/react"')) return null;
+	const imports = html.match(/<script type="importmap">\s*\{\s*"imports"\s*:\s*\{/);
+	if (!imports || imports.index === undefined) return null;
+	const at = imports.index + imports[0].length;
+	return `${html.slice(0, at)}\n    ${MOTION_IMPORT},${html.slice(at)}`;
 }
 
 const STYLES_CSS = `/*
@@ -182,17 +195,24 @@ export function createScaffoldUiKitTool(opts: {
 			if (existingIndex === null) {
 				await ops.writeFile(INDEX_HTML_PATH, renderIndexHtml(args.title?.trim() || 'App', args));
 				written.push(INDEX_HTML_PATH);
-			} else if (appearanceRequested && /<html\b[^>]*>/.test(existingIndex)) {
-				const current = existingIndex.match(/<html\b[^>]*>/)![0];
-				const merged: Appearance = {
-					theme: args.theme ?? current.match(/data-theme="([^"]+)"/)?.[1],
-					radius: args.radius ?? current.match(/data-radius="([^"]+)"/)?.[1],
-					mode: args.mode ?? (/class="[^"]*\bdark\b/.test(current) ? 'dark' : 'light'),
-				};
-				await ops.writeFile(INDEX_HTML_PATH, existingIndex.replace(current, renderHtmlTag(merged)));
-				written.push(INDEX_HTML_PATH);
 			} else {
-				kept.push(INDEX_HTML_PATH);
+				let updated = existingIndex;
+				const current = existingIndex.match(/<html\b[^>]*>/)?.[0];
+				if (appearanceRequested && current) {
+					const merged: Appearance = {
+						theme: args.theme ?? current.match(/data-theme="([^"]+)"/)?.[1],
+						radius: args.radius ?? current.match(/data-radius="([^"]+)"/)?.[1],
+						mode: args.mode ?? (/class="[^"]*\bdark\b/.test(current) ? 'dark' : 'light'),
+					};
+					updated = updated.replace(current, renderHtmlTag(merged));
+				}
+				updated = withMotionImport(updated) ?? updated;
+				if (updated !== existingIndex) {
+					await ops.writeFile(INDEX_HTML_PATH, updated);
+					written.push(INDEX_HTML_PATH);
+				} else {
+					kept.push(INDEX_HTML_PATH);
+				}
 			}
 
 			for (const [path, content] of [
@@ -214,7 +234,7 @@ export function createScaffoldUiKitTool(opts: {
 				...(kept.includes(INDEX_HTML_PATH) && !existingIndex?.includes('cdn.tailwindcss.com')
 					? {
 							warning:
-								'public/index.html already existed and was not changed. It must link /vendor/ui-kit.css before your own CSS, define an import map for react, react/jsx-runtime, react-dom, react-dom/client and lucide-react, load the Tailwind runtime, and compile JSX with the automatic runtime — compare it with the shell this tool creates in an empty space.',
+								'public/index.html already existed and was not changed. It must link /vendor/ui-kit.css before your own CSS, define an import map for react, react/jsx-runtime, react-dom, react-dom/client, lucide-react and motion/react, load the Tailwind runtime, and compile JSX with the automatic runtime — compare it with the shell this tool creates in an empty space.',
 						}
 					: {}),
 				next_steps: NEXT_STEPS,

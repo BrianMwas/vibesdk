@@ -44,7 +44,7 @@ describe('scaffold_ui_kit tool', () => {
 		const html = ws.files.get('public/index.html')!;
 		expect(html).toContain('<title>Kimathi &amp; Co &lt;Advocates&gt;</title>');
 		expect(html.indexOf('/vendor/ui-kit.css')).toBeLessThan(html.indexOf('/styles.css'));
-		for (const specifier of ['"react"', '"react/jsx-runtime"', '"react-dom"', '"react-dom/client"']) {
+		for (const specifier of ['"react"', '"react/jsx-runtime"', '"react-dom"', '"react-dom/client"', '"motion/react"']) {
 			expect(html).toContain(specifier);
 		}
 		expect(html).toContain('runtime: "automatic"');
@@ -110,6 +110,27 @@ describe('scaffold_ui_kit tool', () => {
 		const after = ws.files.get('public/index.html')!;
 		expect(after).toContain('<html lang="en" data-theme="green" data-radius="large">');
 		expect(after.replace(/<html\b[^>]*>/, '')).toBe(before.replace(/<html\b[^>]*>/, ''));
+	});
+
+	it('adds motion/react to the import map of a shell written before it, once', async () => {
+		const ws = memoryWorkspace();
+		await run(ws.ops, { title: 'Site' });
+		const current = ws.files.get('public/index.html')!;
+		// The shell as written before motion: lucide-react was the last entry.
+		const older = current.replace(/,\n\s*"motion\/react": "[^"]+"/, '');
+		expect(older).not.toContain('motion/react');
+		ws.files.set('public/index.html', older);
+
+		const result = await run(ws.ops);
+		const patched = ws.files.get('public/index.html')!;
+		expect(result.written).toContain('public/index.html');
+		expect(patched).toContain('"motion/react": "https://esm.sh/motion@');
+		expect(JSON.parse(patched.match(/<script type="importmap">([\s\S]*?)<\/script>/)![1]).imports['motion/react']).toMatch(/external=react,react-dom$/);
+		expect(patched.replace(/\n\s*"motion\/react": "[^"]+",/, '')).toBe(older);
+
+		const again = await run(ws.ops);
+		expect(again.kept_existing).toContain('public/index.html');
+		expect(ws.files.get('public/index.html')).toBe(patched);
 	});
 
 	it('ships every theme preset with a dark variant and scales radii from --radius', () => {

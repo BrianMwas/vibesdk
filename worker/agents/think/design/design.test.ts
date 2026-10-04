@@ -79,14 +79,20 @@ describe('fonts', () => {
 
 describe('normaliseSections', () => {
 	it('frames the body sections with header, one hero and footer', () => {
-		expect(normaliseSections(['feature-grid', 'hero-centered', 'faq', 'contact'])).toEqual([
-			'marketing-header', 'hero-centered', 'feature-grid', 'faq', 'contact', 'site-footer',
+		expect(normaliseSections(['feature-grid', 'hero-workflow', 'process-steps', 'faq', 'contact'])).toEqual([
+			'marketing-header', 'hero-workflow', 'feature-grid', 'process-steps', 'faq', 'contact', 'site-footer',
 		]);
 	});
 
 	it('keeps the first hero only and drops repeats and unknown names', () => {
-		expect(normaliseSections(['site-footer', 'hero-split', 'hero-centered', 'faq', 'faq', 'data-table', 'marketing-header'])).toEqual([
+		expect(normaliseSections(['site-footer', 'hero-split', 'hero-statement', 'faq', 'faq', 'data-table', 'marketing-header'])).toEqual([
 			'marketing-header', 'hero-split', 'faq', 'site-footer',
+		]);
+	});
+
+	it('keeps one block from each group of alternatives', () => {
+		expect(normaliseSections(['hero-product', 'process-interactive', 'faq-topics', 'process-steps', 'faq', 'contact'])).toEqual([
+			'marketing-header', 'hero-product', 'process-interactive', 'faq-topics', 'contact', 'site-footer',
 		]);
 	});
 

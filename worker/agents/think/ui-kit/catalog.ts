@@ -11,7 +11,7 @@ export interface UiBlock {
 	notes: string;
 	/** Top-level component(s) the block renders. */
 	entry: string;
-	imports: { reactNamespace: boolean; react: string[]; lucide: string[]; kit: string[] };
+	imports: { reactNamespace: boolean; react: string[]; lucide: string[]; motion: string[]; kit: string[] };
 	/** Top-level names the block declares; two merged blocks must not share one. */
 	declarations: string[];
 	body: string;
@@ -29,14 +29,21 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 	{
 		"name": "marketing-header",
 		"category": "marketing",
-		"description": "Sticky site header: brand, a few links on desktop, a Sheet slide-out menu on mobile, one call to action.",
-		"notes": "",
+		"description": "Sticky site header that turns solid on scroll: brand, section links with a highlight that glides between them and marks the section in view, a Sheet menu on mobile, one call to action.",
+		"notes": "Point each link's href at a section id that exists on the page.",
 		"entry": "MarketingHeader",
 		"imports": {
 			"reactNamespace": false,
-			"react": [],
+			"react": [
+				"useEffect",
+				"useState"
+			],
 			"lucide": [
 				"Menu"
+			],
+			"motion": [
+				"MotionConfig",
+				"motion"
 			],
 			"kit": [
 				"Button",
@@ -51,55 +58,158 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"marketingNavLinks",
 			"MarketingHeader"
 		],
-		"body": "const marketingNavLinks = [\n  { label: \"Services\", href: \"#services\" },\n  { label: \"About\", href: \"#about\" },\n  { label: \"Pricing\", href: \"#pricing\" },\n  { label: \"Contact\", href: \"#contact\" }\n];\nfunction MarketingHeader() {\n  return <header className=\"sticky top-0 z-40 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75\">\n      <Container className=\"flex h-16 items-center justify-between gap-6\">\n        <a href=\"#\" className=\"text-base font-semibold tracking-tight\">\n          Brand\n        </a>\n        <nav aria-label=\"Main\" className=\"hidden items-center gap-1 md:flex\">\n          {marketingNavLinks.map((link) => <Button key={link.href} variant=\"ghost\" asChild>\n              <a href={link.href}>{link.label}</a>\n            </Button>)}\n        </nav>\n        <div className=\"flex items-center gap-2\">\n          <Button asChild className=\"hidden sm:inline-flex\">\n            <a href=\"#contact\">Get in touch</a>\n          </Button>\n          <Sheet>\n            <SheetTrigger asChild>\n              <Button variant=\"ghost\" size=\"icon\" className=\"md:hidden\" aria-label=\"Open menu\">\n                <Menu />\n              </Button>\n            </SheetTrigger>\n            <SheetContent side=\"right\" className=\"w-72\">\n              <SheetTitle>Menu</SheetTitle>\n              <nav aria-label=\"Mobile\" className=\"mt-6 flex flex-col gap-1\">\n                {marketingNavLinks.map((link) => <Button key={link.href} variant=\"ghost\" className=\"justify-start\" asChild>\n                    <a href={link.href}>{link.label}</a>\n                  </Button>)}\n                <Button className=\"mt-4\" asChild>\n                  <a href=\"#contact\">Get in touch</a>\n                </Button>\n              </nav>\n            </SheetContent>\n          </Sheet>\n        </div>\n      </Container>\n    </header>;\n}\n"
+		"body": "const marketingNavLinks = [\n  { label: \"Services\", href: \"#services\" },\n  { label: \"How it works\", href: \"#how-it-works\" },\n  { label: \"Pricing\", href: \"#pricing\" },\n  { label: \"Contact\", href: \"#contact\" }\n];\nfunction MarketingHeader() {\n  const [scrolled, setScrolled] = useState(false);\n  const [current, setCurrent] = useState(null);\n  const [hovered, setHovered] = useState(null);\n  const [menuOpen, setMenuOpen] = useState(false);\n  useEffect(() => {\n    const onScroll = () => setScrolled(window.scrollY > 8);\n    onScroll();\n    window.addEventListener(\"scroll\", onScroll, { passive: true });\n    return () => window.removeEventListener(\"scroll\", onScroll);\n  }, []);\n  useEffect(() => {\n    const sections = marketingNavLinks.map((link) => document.getElementById(link.href.slice(1))).filter(Boolean);\n    if (sections.length === 0) return;\n    const visible = /* @__PURE__ */ new Map();\n    const observer = new IntersectionObserver(\n      (entries) => {\n        entries.forEach((entry) => visible.set(entry.target.id, entry.isIntersecting));\n        const first = sections.find((section) => visible.get(section.id));\n        setCurrent(first ? `#${first.id}` : null);\n      },\n      { rootMargin: \"-40% 0px -55% 0px\" }\n    );\n    sections.forEach((section) => observer.observe(section));\n    return () => observer.disconnect();\n  }, []);\n  const highlighted = hovered ?? current;\n  return <MotionConfig reducedMotion=\"user\">\n      <header\n    className={`sticky top-0 z-40 border-b transition-[background-color,border-color,box-shadow] duration-300 ${scrolled || menuOpen ? \"border-border bg-background/85 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/70\" : \"border-transparent bg-transparent\"}`}\n  >\n        <Container className=\"flex h-16 items-center justify-between gap-6\">\n          <a href=\"#\" className=\"text-base font-semibold tracking-tight\">\n            Brand\n          </a>\n          <nav aria-label=\"Main\" className=\"hidden md:block\" onMouseLeave={() => setHovered(null)}>\n            <ul className=\"flex items-center gap-1\">\n              {marketingNavLinks.map((link) => <li key={link.href} className=\"relative\">\n                  {highlighted === link.href ? <motion.span\n    layoutId=\"marketing-header-highlight\"\n    className=\"absolute inset-0 rounded-md bg-muted\"\n    transition={{ type: \"spring\", duration: 0.35, bounce: 0 }}\n  /> : null}\n                  <a\n    href={link.href}\n    aria-current={current === link.href ? \"location\" : void 0}\n    onMouseEnter={() => setHovered(link.href)}\n    onFocus={() => setHovered(link.href)}\n    onBlur={() => setHovered(null)}\n    className={`relative block rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${highlighted === link.href ? \"text-foreground\" : \"text-muted-foreground\"}`}\n  >\n                    {link.label}\n                  </a>\n                </li>)}\n            </ul>\n          </nav>\n          <div className=\"flex items-center gap-2\">\n            <Button asChild className=\"hidden sm:inline-flex\">\n              <a href=\"#contact\">Get in touch</a>\n            </Button>\n            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>\n              <SheetTrigger asChild>\n                <Button variant=\"ghost\" size=\"icon\" className=\"md:hidden\" aria-label=\"Open menu\">\n                  <Menu />\n                </Button>\n              </SheetTrigger>\n              <SheetContent side=\"right\" className=\"w-72\">\n                <SheetTitle>Menu</SheetTitle>\n                <nav aria-label=\"Mobile\" className=\"mt-6 flex flex-col gap-1\">\n                  {marketingNavLinks.map((link) => <Button key={link.href} variant=\"ghost\" className=\"justify-start\" asChild>\n                      <a href={link.href} onClick={() => setMenuOpen(false)}>\n                        {link.label}\n                      </a>\n                    </Button>)}\n                  <Button className=\"mt-4\" asChild>\n                    <a href=\"#contact\" onClick={() => setMenuOpen(false)}>\n                      Get in touch\n                    </a>\n                  </Button>\n                </nav>\n              </SheetContent>\n            </Sheet>\n          </div>\n        </Container>\n      </header>\n    </MotionConfig>;\n}\n"
 	},
 	{
 		"name": "hero-split",
 		"category": "marketing",
-		"description": "Hero with headline, supporting sentence and two actions beside an image (4:3).",
-		"notes": "Set heroSplitImage to a search_images result, or drop the image column for a typographic hero.",
+		"description": "Hero with headline, supporting sentence and two actions beside a photo (4:3) that unfolds into place. For a place, a craft or a physical product.",
+		"notes": "Set heroSplitImage to a search_images result that shows the real subject.",
 		"entry": "HeroSplit",
 		"imports": {
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [
+				"MotionConfig",
+				"motion"
+			],
 			"kit": [
 				"AspectRatio",
 				"Button",
 				"Container",
 				"Inline",
-				"Section",
-				"Stack"
+				"Section"
 			]
 		},
 		"declarations": [
 			"heroSplitImage",
+			"heroSplitEase",
+			"heroSplitGroup",
+			"heroSplitRise",
 			"HeroSplit"
 		],
-		"body": "const heroSplitImage = { src: \"\", alt: \"\" };\nfunction HeroSplit() {\n  return <Section spacing=\"lg\">\n      <Container className=\"grid items-center gap-12 lg:grid-cols-2\">\n        <Stack gap=\"lg\" align=\"start\">\n          <h1 className=\"text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl\">\n            A headline that says plainly what you do\n          </h1>\n          <p className=\"max-w-xl text-lg text-muted-foreground\">\n            One or two sentences on who this is for and the outcome they get.\n          </p>\n          <Inline gap=\"sm\">\n            <Button size=\"lg\">Primary action</Button>\n            <Button size=\"lg\" variant=\"outline\">\n              Secondary action\n            </Button>\n          </Inline>\n        </Stack>\n        <AspectRatio ratio={4 / 3} className=\"overflow-hidden rounded-xl bg-muted\">\n          {heroSplitImage.src ? <img\n    src={heroSplitImage.src}\n    alt={heroSplitImage.alt}\n    className=\"size-full object-cover outline outline-1 -outline-offset-1 outline-black/10\"\n  /> : null}\n        </AspectRatio>\n      </Container>\n    </Section>;\n}\n"
+		"body": "const heroSplitImage = { src: \"\", alt: \"\" };\nconst heroSplitEase = [0.2, 0, 0, 1];\nconst heroSplitGroup = { hidden: {}, shown: { transition: { staggerChildren: 0.1, delayChildren: 0.05 } } };\nconst heroSplitRise = {\n  hidden: { opacity: 0, y: 12, filter: \"blur(4px)\" },\n  shown: { opacity: 1, y: 0, filter: \"blur(0px)\", transition: { duration: 0.6, ease: heroSplitEase } }\n};\nfunction HeroSplit() {\n  return <MotionConfig reducedMotion=\"user\">\n      <Section spacing=\"lg\">\n        <Container className=\"grid items-center gap-12 lg:grid-cols-2\">\n          <motion.div variants={heroSplitGroup} initial=\"hidden\" animate=\"shown\" className=\"flex flex-col items-start gap-6\">\n            <motion.h1 variants={heroSplitRise} className=\"text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl\">\n              A headline that says plainly what you do\n            </motion.h1>\n            <motion.p variants={heroSplitRise} className=\"max-w-xl text-lg text-muted-foreground\">\n              One or two sentences on who this is for and the outcome they get.\n            </motion.p>\n            <motion.div variants={heroSplitRise}>\n              <Inline gap=\"sm\">\n                <Button size=\"lg\">Primary action</Button>\n                <Button size=\"lg\" variant=\"outline\">\n                  Secondary action\n                </Button>\n              </Inline>\n            </motion.div>\n          </motion.div>\n          <motion.div\n    initial={{ opacity: 0, clipPath: \"inset(6% 6% 6% 6% round 12px)\" }}\n    animate={{ opacity: 1, clipPath: \"inset(0% 0% 0% 0% round 12px)\" }}\n    transition={{ duration: 0.9, ease: heroSplitEase, delay: 0.25 }}\n  >\n            <AspectRatio ratio={4 / 3} className=\"overflow-hidden rounded-xl bg-muted\">\n              {heroSplitImage.src ? <img\n    src={heroSplitImage.src}\n    alt={heroSplitImage.alt}\n    className=\"size-full object-cover outline outline-1 -outline-offset-1 outline-black/10\"\n  /> : null}\n            </AspectRatio>\n          </motion.div>\n        </Container>\n      </Section>\n    </MotionConfig>;\n}\n"
 	},
 	{
-		"name": "hero-centered",
+		"name": "hero-product",
 		"category": "marketing",
-		"description": "Centered typographic hero: headline, supporting sentence, two actions.",
-		"notes": "",
-		"entry": "HeroCentered",
+		"description": "Centered headline and actions over a soft fade, with a product window that rises from the bottom edge. Its sample screen (sidebar, KPI cards, a bar chart that grows in, recent rows) shows software at work. For software, apps and online tools.",
+		"notes": "Rewrite HeroProductScreen (nav items, stats, rows) as this product's own main screen, or set heroProductImage to a real screenshot. heroProductAnnouncement renders only when its label is set.",
+		"entry": "HeroProduct",
 		"imports": {
 			"reactNamespace": false,
 			"react": [],
-			"lucide": [],
+			"lucide": [
+				"ArrowRight"
+			],
+			"motion": [
+				"MotionConfig",
+				"motion"
+			],
 			"kit": [
 				"Button",
 				"Container",
-				"Inline",
-				"Section",
-				"Stack"
+				"Inline"
 			]
 		},
 		"declarations": [
-			"HeroCentered"
+			"heroProductAnnouncement",
+			"heroProductImage",
+			"heroProductEase",
+			"heroProductGroup",
+			"heroProductRise",
+			"heroProductNav",
+			"heroProductStats",
+			"heroProductBars",
+			"heroProductRows",
+			"HeroProductScreen",
+			"HeroProduct"
 		],
-		"body": "function HeroCentered() {\n  return <Section spacing=\"lg\">\n      <Container size=\"md\">\n        <Stack gap=\"lg\" align=\"center\" className=\"text-center\">\n          <h1 className=\"max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl\">\n            A headline that says plainly what you do\n          </h1>\n          <p className=\"max-w-2xl text-lg text-muted-foreground\">\n            One or two sentences on who this is for and the outcome they get.\n          </p>\n          <Inline gap=\"sm\" justify=\"center\">\n            <Button size=\"lg\">Primary action</Button>\n            <Button size=\"lg\" variant=\"outline\">\n              Secondary action\n            </Button>\n          </Inline>\n        </Stack>\n      </Container>\n    </Section>;\n}\n"
+		"body": "const heroProductAnnouncement = { label: \"\", href: \"#\" };\nconst heroProductImage = { src: \"\", alt: \"\" };\nconst heroProductEase = [0.2, 0, 0, 1];\nconst heroProductGroup = { hidden: {}, shown: { transition: { staggerChildren: 0.1, delayChildren: 0.05 } } };\nconst heroProductRise = {\n  hidden: { opacity: 0, y: 12, filter: \"blur(4px)\" },\n  shown: { opacity: 1, y: 0, filter: \"blur(0px)\", transition: { duration: 0.6, ease: heroProductEase } }\n};\nconst heroProductNav = [\"Overview\", \"Orders\", \"Customers\", \"Reports\"];\nconst heroProductStats = [\n  { label: \"Revenue\", value: \"$48,210\", change: \"+12%\" },\n  { label: \"Orders\", value: \"1,284\", change: \"+8%\" },\n  { label: \"Returning\", value: \"64%\", change: \"+3%\" }\n];\nconst heroProductBars = [38, 52, 44, 61, 57, 72, 66, 80, 74, 88, 82, 95];\nconst heroProductRows = [\n  { name: \"Order 4821\", status: \"Paid\", amount: \"$240.00\" },\n  { name: \"Order 4820\", status: \"Shipped\", amount: \"$1,180.00\" },\n  { name: \"Order 4819\", status: \"Paid\", amount: \"$96.50\" }\n];\nfunction HeroProductScreen() {\n  return <div className=\"grid h-full grid-cols-1 text-left text-xs sm:grid-cols-[11rem_minmax(0,1fr)] sm:text-sm\">\n      <aside className=\"hidden flex-col gap-1 border-r bg-muted/40 p-3 sm:flex\">\n        <div className=\"mb-3 h-5 w-20 rounded-sm bg-foreground/80\" />\n        {heroProductNav.map((item, index) => <div\n    key={item}\n    className={index === 0 ? \"rounded-md bg-background px-2 py-1.5 font-medium shadow-sm\" : \"px-2 py-1.5 text-muted-foreground\"}\n  >\n            {item}\n          </div>)}\n      </aside>\n      <div className=\"flex min-h-0 min-w-0 flex-col gap-4 p-3 sm:p-6\">\n        <div className=\"grid grid-cols-3 gap-2 sm:gap-3\">\n          {heroProductStats.map((stat) => <div key={stat.label} className=\"rounded-lg border bg-background p-3\">\n              <div className=\"text-muted-foreground\">{stat.label}</div>\n              <div className=\"mt-1 flex items-baseline gap-2\">\n                <span className=\"text-sm font-semibold tabular-nums sm:text-xl\">{stat.value}</span>\n                <span className=\"hidden text-primary sm:inline\">{stat.change}</span>\n              </div>\n            </div>)}\n        </div>\n        <div className=\"flex min-h-24 flex-1 items-end gap-1.5 rounded-lg border bg-background p-3 sm:gap-2\">\n          {heroProductBars.map((height, index) => <motion.div\n    key={index}\n    className=\"flex-1 origin-bottom rounded-sm bg-primary/80\"\n    style={{ height: `${height}%` }}\n    initial={{ scaleY: 0 }}\n    animate={{ scaleY: 1 }}\n    transition={{ duration: 0.5, ease: heroProductEase, delay: 0.9 + index * 0.04 }}\n  />)}\n        </div>\n        <div className=\"hidden flex-col divide-y rounded-lg border bg-background sm:flex\">\n          {heroProductRows.map((row) => <div key={row.name} className=\"flex items-center justify-between gap-3 px-3 py-2\">\n              <span>{row.name}</span>\n              <span className=\"text-muted-foreground\">{row.status}</span>\n              <span className=\"tabular-nums\">{row.amount}</span>\n            </div>)}\n        </div>\n      </div>\n    </div>;\n}\nfunction HeroProduct() {\n  return <MotionConfig reducedMotion=\"user\">\n      <section className=\"relative isolate overflow-hidden pt-20 sm:pt-28\">\n        <div aria-hidden=\"true\" className=\"pointer-events-none absolute inset-x-0 top-0 -z-10 h-[40rem] bg-gradient-to-b from-primary/10 to-transparent\" />\n        <Container size=\"md\">\n          <motion.div variants={heroProductGroup} initial=\"hidden\" animate=\"shown\" className=\"flex flex-col items-center gap-6 text-center\">\n            {heroProductAnnouncement.label ? <motion.a\n    variants={heroProductRise}\n    href={heroProductAnnouncement.href}\n    className=\"inline-flex items-center gap-2 rounded-full border bg-background/80 px-3 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground\"\n  >\n                {heroProductAnnouncement.label}\n                <ArrowRight className=\"size-3.5\" aria-hidden=\"true\" />\n              </motion.a> : null}\n            <motion.h1 variants={heroProductRise} className=\"max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl\">\n              A headline that says plainly what the product does\n            </motion.h1>\n            <motion.p variants={heroProductRise} className=\"max-w-2xl text-lg text-muted-foreground\">\n              One or two sentences on who it is for and the outcome they get in their first week.\n            </motion.p>\n            <motion.div variants={heroProductRise}>\n              <Inline gap=\"sm\" justify=\"center\">\n                <Button size=\"lg\" asChild>\n                  <a href=\"#contact\">\n                    Primary action\n                    <ArrowRight aria-hidden=\"true\" />\n                  </a>\n                </Button>\n                <Button size=\"lg\" variant=\"outline\" asChild>\n                  <a href=\"#how-it-works\">Secondary action</a>\n                </Button>\n              </Inline>\n            </motion.div>\n          </motion.div>\n        </Container>\n        <Container size=\"xl\" className=\"mt-14 sm:mt-20\">\n          <motion.div\n    className=\"relative mx-auto max-w-6xl overflow-hidden rounded-t-xl border border-b-0 bg-card shadow-2xl shadow-primary/10\"\n    initial={{ opacity: 0, y: 48 }}\n    animate={{ opacity: 1, y: 0 }}\n    transition={{ duration: 1, ease: heroProductEase, delay: 0.35 }}\n  >\n            <div className=\"flex items-center gap-2 border-b bg-muted/50 px-4 py-2.5\" aria-hidden=\"true\">\n              <span className=\"size-2.5 rounded-full bg-foreground/15\" />\n              <span className=\"size-2.5 rounded-full bg-foreground/15\" />\n              <span className=\"size-2.5 rounded-full bg-foreground/15\" />\n              <span className=\"mx-auto h-5 w-48 rounded-md bg-background/80\" />\n            </div>\n            <div className=\"aspect-[4/3] sm:aspect-[16/9]\">\n              {heroProductImage.src ? <img src={heroProductImage.src} alt={heroProductImage.alt} className=\"size-full object-cover object-top\" /> : <HeroProductScreen />}\n            </div>\n          </motion.div>\n        </Container>\n        <div aria-hidden=\"true\" className=\"pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent\" />\n      </section>\n    </MotionConfig>;\n}\n"
+	},
+	{
+		"name": "hero-workflow",
+		"category": "marketing",
+		"description": "Split hero: copy beside a live panel that runs the business's process step by step (each step waits, works, then reports its result; a line fills between steps), cycling through sample cases with a \"Next example\" button. For services and products whose value is in how the work flows.",
+		"notes": "Replace heroWorkflowSteps with the real steps (3 to 5) and heroWorkflowRuns with realistic cases, one result per step. Pauses off screen; with reduced motion each case shows finished.",
+		"entry": "HeroWorkflow",
+		"imports": {
+			"reactNamespace": false,
+			"react": [
+				"useEffect",
+				"useRef",
+				"useState"
+			],
+			"lucide": [
+				"ArrowRight",
+				"Check",
+				"ClipboardCheck",
+				"Inbox",
+				"Send",
+				"UserRound"
+			],
+			"motion": [
+				"AnimatePresence",
+				"MotionConfig",
+				"motion",
+				"useInView",
+				"useReducedMotion"
+			],
+			"kit": [
+				"Button",
+				"Container",
+				"Inline"
+			]
+		},
+		"declarations": [
+			"heroWorkflowSteps",
+			"heroWorkflowRuns",
+			"heroWorkflowEase",
+			"heroWorkflowStepMs",
+			"heroWorkflowHoldMs",
+			"heroWorkflowGroup",
+			"heroWorkflowRise",
+			"heroWorkflowSwap",
+			"HeroWorkflowStatus",
+			"HeroWorkflowCanvas",
+			"HeroWorkflow"
+		],
+		"body": "const heroWorkflowSteps = [\n  { icon: Inbox, title: \"Request comes in\", waiting: \"Website, phone or email\" },\n  { icon: ClipboardCheck, title: \"We review the details\", waiting: \"Scope, timing and budget\" },\n  { icon: UserRound, title: \"Matched with a specialist\", waiting: \"Based on the job\" },\n  { icon: Send, title: \"You get a clear plan\", waiting: \"Price and start date\" }\n];\nconst heroWorkflowRuns = [\n  { name: \"Kitchen refit, 3 rooms\", results: [\"From the website\", \"Fits the June calendar\", \"Assigned to Dana\", \"Plan sent by email\"], total: \"2 days\" },\n  { name: \"Office move, 40 desks\", results: [\"By phone\", \"Needs a weekend crew\", \"Assigned to Marco\", \"Plan sent by email\"], total: \"1 day\" },\n  { name: \"Bathroom repair\", results: [\"From the website\", \"Small job, next week\", \"Assigned to Priya\", \"Plan sent by text\"], total: \"4 hours\" }\n];\nconst heroWorkflowEase = [0.2, 0, 0, 1];\nconst heroWorkflowStepMs = 1100;\nconst heroWorkflowHoldMs = 2800;\nconst heroWorkflowGroup = { hidden: {}, shown: { transition: { staggerChildren: 0.1, delayChildren: 0.05 } } };\nconst heroWorkflowRise = {\n  hidden: { opacity: 0, y: 12, filter: \"blur(4px)\" },\n  shown: { opacity: 1, y: 0, filter: \"blur(0px)\", transition: { duration: 0.6, ease: heroWorkflowEase } }\n};\nconst heroWorkflowSwap = {\n  initial: { opacity: 0, scale: 0.25, filter: \"blur(4px)\" },\n  animate: { opacity: 1, scale: 1, filter: \"blur(0px)\" },\n  exit: { opacity: 0, scale: 0.25, filter: \"blur(4px)\" },\n  transition: { type: \"spring\", duration: 0.3, bounce: 0 }\n};\nfunction HeroWorkflowStatus({ status }) {\n  return <span className=\"relative flex size-6 shrink-0 items-center justify-center\">\n      <AnimatePresence mode=\"popLayout\" initial={false}>\n        {status === \"done\" ? <motion.span key=\"done\" {...heroWorkflowSwap} className=\"flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground\">\n            <Check className=\"size-3.5\" strokeWidth={2.5} role=\"img\" aria-label=\"Done\" />\n          </motion.span> : status === \"running\" ? <motion.span key=\"running\" {...heroWorkflowSwap} className=\"flex size-6 items-center justify-center\">\n            <span className=\"size-4 animate-spin rounded-full border-2 border-primary/25 border-t-primary motion-reduce:animate-none\" role=\"img\" aria-label=\"In progress\" />\n          </motion.span> : <motion.span key=\"idle\" {...heroWorkflowSwap} className=\"flex size-6 items-center justify-center\">\n            <span className=\"size-2 rounded-full bg-muted-foreground/40\" role=\"img\" aria-label=\"Waiting\" />\n          </motion.span>}\n      </AnimatePresence>\n    </span>;\n}\nfunction HeroWorkflowCanvas() {\n  const canvas = useRef(null);\n  const visible = useInView(canvas, { amount: 0.3 });\n  const reduced = useReducedMotion();\n  const [run, setRun] = useState({ index: 0, count: 1, active: -1 });\n  const total = heroWorkflowSteps.length;\n  useEffect(() => {\n    if (reduced || !visible) return;\n    const finished2 = run.active >= total;\n    const timer = window.setTimeout(\n      () => setRun(\n        (current) => current.active >= total ? { index: (current.index + 1) % heroWorkflowRuns.length, count: current.count + 1, active: 0 } : { ...current, active: current.active + 1 }\n      ),\n      finished2 ? heroWorkflowHoldMs : run.active < 0 ? 700 : heroWorkflowStepMs\n    );\n    return () => window.clearTimeout(timer);\n  }, [run, reduced, visible, total]);\n  const nextExample = () => setRun((current) => ({ index: (current.index + 1) % heroWorkflowRuns.length, count: current.count + 1, active: reduced ? total : 0 }));\n  const example = heroWorkflowRuns[run.index];\n  const active = reduced ? total : run.active;\n  const statusOf = (index) => index < active ? \"done\" : index === active ? \"running\" : \"idle\";\n  const finished = active >= total;\n  return <div ref={canvas} className=\"overflow-hidden rounded-xl border bg-card shadow-xl shadow-primary/5\">\n      <div className=\"flex items-center justify-between gap-3 border-b px-4 py-3\">\n        <span className=\"flex min-w-0 items-center gap-2 text-sm font-medium\">\n          <span className={`size-2 shrink-0 rounded-full ${visible || reduced ? \"bg-primary\" : \"bg-muted-foreground/40\"}`} aria-hidden=\"true\" />\n          <span className=\"truncate\">{example.name}</span>\n        </span>\n        <Button variant=\"secondary\" size=\"sm\" onClick={nextExample}>\n          Next example\n        </Button>\n      </div>\n      <div\n    className=\"p-4 sm:p-6\"\n    style={{ backgroundImage: \"radial-gradient(hsl(var(--border)) 1px, transparent 1px)\", backgroundSize: \"16px 16px\" }}\n  >\n        <ol className=\"flex flex-col\" aria-label={`How a request moves through, example: ${example.name}`}>\n          {heroWorkflowSteps.map((step, index) => {\n    const status = statusOf(index);\n    const Icon = step.icon;\n    return <li key={step.title} className=\"flex flex-col\">\n                <div\n      className={`flex items-center gap-3 rounded-lg border bg-background px-3 py-3 transition-[border-color,box-shadow] duration-300 sm:px-4 ${status === \"running\" ? \"border-primary/60 shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]\" : \"\"}`}\n    >\n                  <span className=\"flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground [&_svg]:size-4\">\n                    <Icon aria-hidden=\"true\" />\n                  </span>\n                  <span className=\"flex min-w-0 flex-1 flex-col\">\n                    <span className=\"truncate text-sm font-medium\">{step.title}</span>\n                    <span className=\"truncate text-xs text-muted-foreground sm:text-sm\">\n                      {status === \"done\" ? example.results[index] : status === \"running\" ? \"Working on it\" : step.waiting}\n                    </span>\n                  </span>\n                  <HeroWorkflowStatus status={status} />\n                </div>\n                {index < total - 1 ? <span className=\"relative ml-[1.875rem] h-5 w-px bg-border sm:ml-[2.125rem]\" aria-hidden=\"true\">\n                    <motion.span\n      className=\"absolute inset-0 origin-top bg-primary\"\n      initial={false}\n      animate={{ scaleY: index < active ? 1 : 0 }}\n      transition={{ duration: index < active ? 0.35 : 0, ease: heroWorkflowEase }}\n    />\n                  </span> : null}\n              </li>;\n  })}\n        </ol>\n      </div>\n      <div className=\"flex items-center justify-between gap-3 border-t px-4 py-3 text-sm\">\n        <span className=\"text-muted-foreground\">\n          Example <span className=\"tabular-nums\">{run.count}</span>\n        </span>\n        <span className={finished ? \"flex items-center gap-1.5 font-medium\" : \"text-muted-foreground\"}>\n          {finished ? <>\n              <Check className=\"size-4 text-primary\" aria-hidden=\"true\" />\n              Done in {example.total}\n            </> : active < 0 ? \"Starting\" : `Step ${active + 1} of ${total}`}\n        </span>\n      </div>\n    </div>;\n}\nfunction HeroWorkflow() {\n  return <MotionConfig reducedMotion=\"user\">\n      <section className=\"relative isolate overflow-hidden py-20 sm:py-28\">\n        <div aria-hidden=\"true\" className=\"pointer-events-none absolute inset-x-0 top-0 -z-10 h-[32rem] bg-gradient-to-b from-muted/70 to-transparent\" />\n        <Container className=\"grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16\">\n          <motion.div variants={heroWorkflowGroup} initial=\"hidden\" animate=\"shown\" className=\"flex flex-col items-start gap-6\">\n            <motion.h1 variants={heroWorkflowRise} className=\"text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl\">\n              A headline about the result, not the process\n            </motion.h1>\n            <motion.p variants={heroWorkflowRise} className=\"max-w-xl text-lg text-muted-foreground\">\n              One or two sentences on who this is for. The panel shows how a request moves from first contact to a finished plan.\n            </motion.p>\n            <motion.div variants={heroWorkflowRise}>\n              <Inline gap=\"sm\">\n                <Button size=\"lg\" asChild>\n                  <a href=\"#contact\">\n                    Primary action\n                    <ArrowRight aria-hidden=\"true\" />\n                  </a>\n                </Button>\n                <Button size=\"lg\" variant=\"outline\" asChild>\n                  <a href=\"#how-it-works\">Secondary action</a>\n                </Button>\n              </Inline>\n            </motion.div>\n            <motion.p variants={heroWorkflowRise} className=\"text-sm text-muted-foreground\">\n              One reassuring fact, such as how fast people hear back.\n            </motion.p>\n          </motion.div>\n          <motion.div\n    initial={{ opacity: 0, y: 24 }}\n    animate={{ opacity: 1, y: 0 }}\n    transition={{ duration: 0.9, ease: heroWorkflowEase, delay: 0.3 }}\n  >\n            <HeroWorkflowCanvas />\n          </motion.div>\n        </Container>\n      </section>\n    </MotionConfig>;\n}\n"
+	},
+	{
+		"name": "hero-statement",
+		"category": "marketing",
+		"description": "Full-screen typographic hero: a very large statement that rises in word by word, then a ruled row with the supporting sentence and actions, and an optional row of real customer names. Optional full-bleed photo behind the type. For studios, agencies, firms and confident brands.",
+		"notes": "Keep heroStatementTitle under about ten words. heroStatementNames stays empty unless the brief names real customers.",
+		"entry": "HeroStatement",
+		"imports": {
+			"reactNamespace": false,
+			"react": [],
+			"lucide": [
+				"ArrowRight"
+			],
+			"motion": [
+				"MotionConfig",
+				"motion"
+			],
+			"kit": [
+				"Button",
+				"Container",
+				"Inline"
+			]
+		},
+		"declarations": [
+			"heroStatementTitle",
+			"heroStatementImage",
+			"heroStatementNames",
+			"heroStatementEase",
+			"heroStatementWords",
+			"heroStatementWord",
+			"heroStatementRise",
+			"HeroStatement"
+		],
+		"body": "const heroStatementTitle = \"A short, confident statement of what you do\";\nconst heroStatementImage = { src: \"\", alt: \"\" };\nconst heroStatementNames = [];\nconst heroStatementEase = [0.2, 0, 0, 1];\nconst heroStatementWords = {\n  hidden: {},\n  shown: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } }\n};\nconst heroStatementWord = {\n  hidden: { opacity: 0, y: 16, filter: \"blur(4px)\" },\n  shown: { opacity: 1, y: 0, filter: \"blur(0px)\", transition: { duration: 0.6, ease: heroStatementEase } }\n};\nconst heroStatementRise = (delay) => ({\n  initial: { opacity: 0, y: 12, filter: \"blur(4px)\" },\n  animate: { opacity: 1, y: 0, filter: \"blur(0px)\" },\n  transition: { duration: 0.6, ease: heroStatementEase, delay }\n});\nfunction HeroStatement() {\n  const words = heroStatementTitle.split(\" \");\n  const afterTitle = 0.15 + words.length * 0.08;\n  const photo = Boolean(heroStatementImage.src);\n  return <MotionConfig reducedMotion=\"user\">\n      <section className=\"relative isolate flex min-h-[calc(100svh-4rem)] flex-col overflow-hidden\">\n        {photo ? <>\n            <motion.img\n    src={heroStatementImage.src}\n    alt={heroStatementImage.alt}\n    className=\"absolute inset-0 -z-20 size-full object-cover\"\n    initial={{ opacity: 0, scale: 1.04 }}\n    animate={{ opacity: 1, scale: 1 }}\n    transition={{ duration: 1.4, ease: heroStatementEase }}\n  />\n            <div aria-hidden=\"true\" className=\"absolute inset-0 -z-10 bg-gradient-to-t from-background via-background/80 to-background/30\" />\n          </> : null}\n        <Container className=\"flex flex-1 flex-col justify-end gap-12 pb-12 pt-24 sm:gap-16 sm:pb-16\">\n          <motion.h1\n    variants={heroStatementWords}\n    initial=\"hidden\"\n    animate=\"shown\"\n    className=\"max-w-5xl text-5xl font-medium leading-[1.02] tracking-tight sm:text-7xl lg:text-8xl\"\n  >\n            {words.map((word, index) => <motion.span key={index} variants={heroStatementWord} className=\"inline-block whitespace-pre\">\n                {index < words.length - 1 ? `${word} ` : word}\n              </motion.span>)}\n          </motion.h1>\n          <motion.div\n    {...heroStatementRise(afterTitle)}\n    className=\"flex flex-col gap-8 border-t pt-8 lg:flex-row lg:items-end lg:justify-between\"\n  >\n            <p className=\"max-w-xl text-lg text-muted-foreground\">\n              One or two sentences on who this is for and why they choose you over the alternatives.\n            </p>\n            <div className=\"flex flex-col gap-3 lg:items-end\">\n              <Inline gap=\"sm\">\n                <Button size=\"lg\" asChild>\n                  <a href=\"#contact\">\n                    Primary action\n                    <ArrowRight aria-hidden=\"true\" />\n                  </a>\n                </Button>\n                <Button size=\"lg\" variant=\"outline\" asChild>\n                  <a href=\"#services\">Secondary action</a>\n                </Button>\n              </Inline>\n              <p className=\"text-sm text-muted-foreground\">One reassuring fact, such as a free first visit.</p>\n            </div>\n          </motion.div>\n          {heroStatementNames.length > 0 ? <motion.div {...heroStatementRise(afterTitle + 0.15)} className=\"flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8\">\n              <p className=\"shrink-0 text-sm text-muted-foreground\">Trusted by</p>\n              <ul className=\"flex flex-wrap items-center gap-x-8 gap-y-2 text-base font-medium text-foreground/70\">\n                {heroStatementNames.map((name) => <li key={name}>{name}</li>)}\n              </ul>\n            </motion.div> : null}\n        </Container>\n      </section>\n    </MotionConfig>;\n}\n"
 	},
 	{
 		"name": "feature-grid",
@@ -118,6 +228,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"Users",
 				"Wallet"
 			],
+			"motion": [],
 			"kit": [
 				"Container",
 				"Grid",
@@ -142,6 +253,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Avatar",
 				"AvatarFallback",
@@ -171,6 +283,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"lucide": [
 				"Check"
 			],
+			"motion": [],
 			"kit": [
 				"Badge",
 				"Button",
@@ -195,15 +308,133 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 		"body": "const pricingPlans = [\n  { name: \"Starter\", price: \"KES 0\", period: \"\", description: \"For trying it out.\", features: [\"First inclusion\", \"Second inclusion\", \"Third inclusion\"], cta: \"Get started\" },\n  { name: \"Standard\", price: \"KES 4,900\", period: \"/ month\", description: \"For most clients.\", features: [\"Everything in Starter\", \"Second inclusion\", \"Third inclusion\", \"Fourth inclusion\"], cta: \"Choose Standard\", featured: true },\n  { name: \"Premium\", price: \"KES 12,000\", period: \"/ month\", description: \"For complex needs.\", features: [\"Everything in Standard\", \"Second inclusion\", \"Third inclusion\"], cta: \"Talk to us\" }\n];\nfunction Pricing() {\n  return <Section id=\"pricing\">\n      <Container>\n        <Stack gap=\"2xl\">\n          <SectionHeader title=\"Pricing\" description=\"Plain prices, no surprises.\" align=\"center\" />\n          <Grid cols={3} className=\"items-start\">\n            {pricingPlans.map((plan) => <Card key={plan.name} className={cn(\"flex flex-col\", plan.featured && \"border-primary shadow-md\")}>\n                <CardHeader>\n                  <div className=\"flex items-center justify-between gap-2\">\n                    <CardTitle className=\"text-lg\">{plan.name}</CardTitle>\n                    {plan.featured ? <Badge>Most chosen</Badge> : null}\n                  </div>\n                  <CardDescription>{plan.description}</CardDescription>\n                </CardHeader>\n                <CardContent className=\"flex flex-1 flex-col gap-6\">\n                  <div className=\"flex items-baseline gap-1\">\n                    <span className=\"text-3xl font-semibold tabular-nums tracking-tight\">{plan.price}</span>\n                    {plan.period ? <span className=\"text-sm text-muted-foreground\">{plan.period}</span> : null}\n                  </div>\n                  <ul className=\"flex flex-col gap-2 text-sm\">\n                    {plan.features.map((feature) => <li key={feature} className=\"flex items-start gap-2\">\n                        <Check className=\"mt-0.5 size-4 shrink-0 text-primary\" />\n                        <span>{feature}</span>\n                      </li>)}\n                  </ul>\n                </CardContent>\n                <CardFooter>\n                  <Button className=\"w-full\" variant={plan.featured ? \"default\" : \"outline\"}>\n                    {plan.cta}\n                  </Button>\n                </CardFooter>\n              </Card>)}\n          </Grid>\n        </Stack>\n      </Container>\n    </Section>;\n}\n"
 	},
 	{
+		"name": "process-steps",
+		"category": "marketing",
+		"description": "\"How it works\" section: 3 to 5 numbered steps joined by a line that draws from one to the next as the section scrolls into view (across on desktop, down on phones), each with a title, a sentence and what the customer has after it.",
+		"notes": "Only for a real sequence. The section id is how-it-works; use process-steps or process-interactive, not both.",
+		"entry": "ProcessSteps",
+		"imports": {
+			"reactNamespace": false,
+			"react": [
+				"useRef"
+			],
+			"lucide": [
+				"Check"
+			],
+			"motion": [
+				"MotionConfig",
+				"motion",
+				"useInView"
+			],
+			"kit": [
+				"Container",
+				"Section",
+				"SectionHeader",
+				"Stack"
+			]
+		},
+		"declarations": [
+			"processSteps",
+			"processStepsEase",
+			"processStepsGap",
+			"processStepsColumns",
+			"ProcessSteps"
+		],
+		"body": "const processSteps = [\n  { title: \"Tell us what you need\", body: \"One or two sentences on what happens in this step and who does it.\", outcome: \"A reply within one working day\" },\n  { title: \"Get a clear plan\", body: \"One or two sentences on what happens in this step and who does it.\", outcome: \"A fixed price and a start date\" },\n  { title: \"We do the work\", body: \"One or two sentences on what happens in this step and who does it.\", outcome: \"Updates at every milestone\" },\n  { title: \"Review and sign off\", body: \"One or two sentences on what happens in this step and who does it.\", outcome: \"Nothing to pay until you approve\" }\n];\nconst processStepsEase = [0.2, 0, 0, 1];\nconst processStepsGap = 0.45;\nconst processStepsColumns = { 3: \"lg:grid-cols-3\", 4: \"lg:grid-cols-4\", 5: \"lg:grid-cols-5\" };\nfunction ProcessSteps() {\n  const list = useRef(null);\n  const inView = useInView(list, { once: true, amount: 0.3 });\n  const state = inView ? \"shown\" : \"hidden\";\n  return <MotionConfig reducedMotion=\"user\">\n      <Section id=\"how-it-works\">\n        <Container>\n          <Stack gap=\"2xl\">\n            <SectionHeader\n    title=\"How it works\"\n    description=\"A short line that sets expectations: how long it takes and what the customer has to do.\"\n  />\n            <ol ref={list} className={`grid gap-10 lg:gap-8 ${processStepsColumns[processSteps.length] ?? \"lg:grid-cols-4\"}`}>\n              {processSteps.map((step, index) => {\n    const delay = 0.1 + index * processStepsGap;\n    const last = index === processSteps.length - 1;\n    return <li key={step.title} className=\"relative flex gap-5 lg:flex-col lg:gap-6\">\n                    {last ? null : <span\n      aria-hidden=\"true\"\n      className=\"absolute left-5 top-12 -bottom-8 w-px bg-border lg:-right-6 lg:bottom-auto lg:left-12 lg:top-5 lg:h-px lg:w-auto\"\n    >\n                        <motion.span\n      className=\"absolute inset-0 hidden origin-left bg-primary lg:block\"\n      initial={{ scaleX: 0 }}\n      animate={{ scaleX: inView ? 1 : 0 }}\n      transition={{ duration: processStepsGap, ease: \"linear\", delay: delay + 0.2 }}\n    />\n                        <motion.span\n      className=\"absolute inset-0 origin-top bg-primary lg:hidden\"\n      initial={{ scaleY: 0 }}\n      animate={{ scaleY: inView ? 1 : 0 }}\n      transition={{ duration: processStepsGap, ease: \"linear\", delay: delay + 0.2 }}\n    />\n                      </span>}\n                    <span className=\"relative flex size-10 shrink-0 items-center justify-center rounded-full border bg-background text-sm font-medium tabular-nums text-muted-foreground\">\n                      {index + 1}\n                      <motion.span\n      aria-hidden=\"true\"\n      className=\"absolute inset-0 flex items-center justify-center rounded-full bg-primary text-primary-foreground\"\n      initial={{ opacity: 0, scale: 0.6 }}\n      animate={{ opacity: inView ? 1 : 0, scale: inView ? 1 : 0.6 }}\n      transition={{ type: \"spring\", duration: 0.4, bounce: 0, delay }}\n    >\n                        {index + 1}\n                      </motion.span>\n                    </span>\n                    <motion.div\n      className=\"flex flex-col gap-2 pt-1.5 lg:pt-0\"\n      initial=\"hidden\"\n      animate={state}\n      variants={{\n        hidden: { opacity: 0, y: 12, filter: \"blur(4px)\" },\n        shown: { opacity: 1, y: 0, filter: \"blur(0px)\", transition: { duration: 0.6, ease: processStepsEase, delay } }\n      }}\n    >\n                      <h3 className=\"text-lg font-semibold tracking-tight\">{step.title}</h3>\n                      <p className=\"text-muted-foreground\">{step.body}</p>\n                      {step.outcome ? <p className=\"mt-2 flex items-start gap-2 text-sm font-medium\">\n                          <Check className=\"mt-0.5 size-4 shrink-0 text-primary\" aria-hidden=\"true\" />\n                          {step.outcome}\n                        </p> : null}\n                    </motion.div>\n                  </li>;\n  })}\n            </ol>\n          </Stack>\n        </Container>\n      </Section>\n    </MotionConfig>;\n}\n"
+	},
+	{
+		"name": "process-interactive",
+		"category": "marketing",
+		"description": "\"How it works\" section people can explore: a list of steps beside a large panel. Choosing a step glides the highlight to it and swaps the panel (the step's image, or its details as a checklist). Plays through once on its own while in view and stops when the visitor takes over.",
+		"notes": "Give steps an image when there is something real to show. The section id is how-it-works; use process-steps or process-interactive, not both.",
+		"entry": "ProcessInteractive",
+		"imports": {
+			"reactNamespace": false,
+			"react": [
+				"useRef",
+				"useState"
+			],
+			"lucide": [
+				"CalendarCheck",
+				"Check",
+				"ClipboardList",
+				"MessageSquare",
+				"Sparkles"
+			],
+			"motion": [
+				"AnimatePresence",
+				"MotionConfig",
+				"motion",
+				"useInView",
+				"useReducedMotion"
+			],
+			"kit": [
+				"Container",
+				"Section",
+				"SectionHeader",
+				"Stack"
+			]
+		},
+		"declarations": [
+			"processInteractiveSteps",
+			"processInteractiveEase",
+			"processInteractiveStepMs",
+			"ProcessInteractivePanel",
+			"ProcessInteractive"
+		],
+		"body": "const processInteractiveSteps = [\n  {\n    icon: MessageSquare,\n    title: \"Tell us what you need\",\n    body: \"One or two sentences on what happens in this step.\",\n    details: [\"A concrete thing the customer does or gets\", \"Another concrete detail\", \"How long this step takes\"],\n    image: { src: \"\", alt: \"\" }\n  },\n  {\n    icon: ClipboardList,\n    title: \"Get a clear plan\",\n    body: \"One or two sentences on what happens in this step.\",\n    details: [\"A concrete thing the customer does or gets\", \"Another concrete detail\", \"How long this step takes\"],\n    image: { src: \"\", alt: \"\" }\n  },\n  {\n    icon: CalendarCheck,\n    title: \"We get to work\",\n    body: \"One or two sentences on what happens in this step.\",\n    details: [\"A concrete thing the customer does or gets\", \"Another concrete detail\", \"How long this step takes\"],\n    image: { src: \"\", alt: \"\" }\n  },\n  {\n    icon: Sparkles,\n    title: \"Enjoy the result\",\n    body: \"One or two sentences on what happens in this step.\",\n    details: [\"A concrete thing the customer does or gets\", \"Another concrete detail\", \"How long this step takes\"],\n    image: { src: \"\", alt: \"\" }\n  }\n];\nconst processInteractiveEase = [0.2, 0, 0, 1];\nconst processInteractiveStepMs = 5e3;\nfunction ProcessInteractivePanel({ step, index }) {\n  const Icon = step.icon;\n  if (step.image.src) {\n    return <img src={step.image.src} alt={step.image.alt} className=\"size-full object-cover\" />;\n  }\n  return <div className=\"flex size-full flex-col justify-between gap-8 p-6 sm:p-10\">\n      <div className=\"flex items-center justify-between\">\n        <span className=\"flex size-12 items-center justify-center rounded-lg bg-primary text-primary-foreground [&_svg]:size-6\">\n          <Icon aria-hidden=\"true\" />\n        </span>\n        <span className=\"text-6xl font-semibold tabular-nums tracking-tight text-foreground/10 sm:text-8xl\" aria-hidden=\"true\">\n          {String(index + 1).padStart(2, \"0\")}\n        </span>\n      </div>\n      <div className=\"flex flex-col gap-5\">\n        <h3 className=\"text-2xl font-semibold tracking-tight sm:text-3xl\">{step.title}</h3>\n        <ul className=\"flex flex-col gap-3\">\n          {step.details.map((detail) => <li key={detail} className=\"flex items-start gap-3 rounded-lg border bg-background/70 px-4 py-3 text-sm sm:text-base\">\n              <Check className=\"mt-0.5 size-4 shrink-0 text-primary\" aria-hidden=\"true\" />\n              {detail}\n            </li>)}\n        </ul>\n      </div>\n    </div>;\n}\nfunction ProcessInteractive() {\n  const section = useRef(null);\n  const inView = useInView(section, { amount: 0.4 });\n  const reduced = useReducedMotion();\n  const [active, setActive] = useState(0);\n  const [autoplay, setAutoplay] = useState(true);\n  const playing = autoplay && inView && !reduced;\n  const stop = () => setAutoplay(false);\n  const advance = () => {\n    if (active >= processInteractiveSteps.length - 1) setAutoplay(false);\n    else setActive(active + 1);\n  };\n  const step = processInteractiveSteps[active];\n  return <MotionConfig reducedMotion=\"user\">\n      <Section id=\"how-it-works\" tone=\"muted\">\n        <Container>\n          <Stack gap=\"2xl\">\n            <SectionHeader title=\"How it works\" description=\"A short line that sets expectations: how long it takes and what the customer has to do.\" />\n            <div\n    ref={section}\n    onPointerEnter={stop}\n    onFocusCapture={stop}\n    className=\"grid items-start gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-12\"\n  >\n              <ol className=\"flex flex-col gap-1\">\n                {processInteractiveSteps.map((item, index) => {\n    const current = index === active;\n    return <li key={item.title} className=\"relative\">\n                      {current ? <motion.span\n      layoutId=\"process-interactive-highlight\"\n      className=\"absolute inset-0 rounded-lg border bg-background shadow-sm\"\n      transition={{ type: \"spring\", duration: 0.4, bounce: 0 }}\n    /> : null}\n                      <button\n      type=\"button\"\n      aria-current={current ? \"step\" : void 0}\n      onClick={() => {\n        stop();\n        setActive(index);\n      }}\n      className=\"relative flex w-full flex-col gap-2 overflow-hidden rounded-lg p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5\"\n    >\n                        <span className=\"flex items-center gap-4\">\n                          <span\n      className={`flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-medium tabular-nums transition-colors duration-300 ${current ? \"bg-primary text-primary-foreground\" : \"bg-background text-muted-foreground ring-1 ring-border\"}`}\n    >\n                            {index + 1}\n                          </span>\n                          <span className={`text-base font-semibold transition-colors duration-300 ${current ? \"\" : \"text-muted-foreground\"}`}>{item.title}</span>\n                        </span>\n                        <AnimatePresence initial={false}>\n                          {current ? <motion.span\n      key=\"body\"\n      className=\"block overflow-hidden pl-12 text-muted-foreground\"\n      initial={{ height: 0, opacity: 0 }}\n      animate={{ height: \"auto\", opacity: 1 }}\n      exit={{ height: 0, opacity: 0 }}\n      transition={{ duration: 0.3, ease: processInteractiveEase }}\n    >\n                              {item.body}\n                            </motion.span> : null}\n                        </AnimatePresence>\n                        {current && playing ? <span className=\"absolute inset-x-4 bottom-0 h-0.5 overflow-hidden rounded-full bg-border\" aria-hidden=\"true\">\n                            <motion.span\n      key={active}\n      className=\"block h-full origin-left bg-primary\"\n      initial={{ scaleX: 0 }}\n      animate={{ scaleX: 1 }}\n      transition={{ duration: processInteractiveStepMs / 1e3, ease: \"linear\" }}\n      onAnimationComplete={advance}\n    />\n                          </span> : null}\n                      </button>\n                    </li>;\n  })}\n              </ol>\n              <div className=\"relative h-[26rem] overflow-hidden rounded-xl border bg-card shadow-sm sm:aspect-[4/3] sm:h-auto lg:sticky lg:top-24\">\n                <AnimatePresence mode=\"popLayout\" initial={false}>\n                  <motion.div\n    key={active}\n    className=\"absolute inset-0\"\n    initial={{ opacity: 0, y: 12, filter: \"blur(4px)\" }}\n    animate={{ opacity: 1, y: 0, filter: \"blur(0px)\" }}\n    exit={{ opacity: 0, y: -12, filter: \"blur(4px)\", transition: { duration: 0.15, ease: \"easeOut\" } }}\n    transition={{ duration: 0.35, ease: processInteractiveEase }}\n  >\n                    <ProcessInteractivePanel step={step} index={active} />\n                  </motion.div>\n                </AnimatePresence>\n              </div>\n            </div>\n          </Stack>\n        </Container>\n      </Section>\n    </MotionConfig>;\n}\n"
+	},
+	{
+		"name": "stats-band",
+		"category": "marketing",
+		"description": "Hairline grid of 3 or 4 headline numbers that count up when scrolled into view, each with a label, a line of context and an optional small trend line that draws in.",
+		"notes": "Only with the business's real figures; never invent numbers. Remove `trend` from a stat with no history to show.",
+		"entry": "StatsBand",
+		"imports": {
+			"reactNamespace": false,
+			"react": [
+				"useEffect",
+				"useMemo",
+				"useRef"
+			],
+			"lucide": [],
+			"motion": [
+				"MotionConfig",
+				"animate",
+				"motion",
+				"useInView",
+				"useReducedMotion"
+			],
+			"kit": [
+				"Container",
+				"Section",
+				"SectionHeader",
+				"Stack"
+			]
+		},
+		"declarations": [
+			"statsBandItems",
+			"statsBandWithTrends",
+			"statsBandEase",
+			"statsBandDuration",
+			"statsBandStagger",
+			"StatsBandNumber",
+			"StatsBandTrend",
+			"StatsBand"
+		],
+		"body": "const statsBandItems = [\n  { label: \"Projects delivered\", value: 1240, suffix: \"+\", detail: \"Since 2014\", trend: [12, 18, 16, 24, 29, 35, 41] },\n  { label: \"Average reply time\", value: 2.5, decimals: 1, suffix: \"h\", detail: \"On working days\" },\n  { label: \"Clients who return\", value: 87, suffix: \"%\", detail: \"Within two years\", trend: [62, 66, 71, 74, 79, 84, 87] },\n  { label: \"Average rating\", value: 4.9, decimals: 1, suffix: \"/5\", detail: \"From 380 reviews\" }\n];\nconst statsBandWithTrends = statsBandItems.some((stat) => stat.trend);\nconst statsBandEase = [0.2, 0, 0, 1];\nconst statsBandDuration = 1.6;\nconst statsBandStagger = 0.12;\nfunction StatsBandNumber({ stat, run, delay }) {\n  const live = useRef(null);\n  const reduced = useReducedMotion();\n  const format = useMemo(() => {\n    const digits = new Intl.NumberFormat(\"en-US\", { minimumFractionDigits: stat.decimals ?? 0, maximumFractionDigits: stat.decimals ?? 0 });\n    return (value) => digits.format(value);\n  }, [stat.decimals]);\n  const final = format(stat.value);\n  useEffect(() => {\n    const node = live.current;\n    if (!node) return;\n    if (reduced) {\n      node.textContent = final;\n      return;\n    }\n    if (!run) {\n      node.textContent = format(0);\n      return;\n    }\n    const controls = animate(0, stat.value, {\n      duration: statsBandDuration,\n      delay,\n      ease: statsBandEase,\n      onUpdate: (latest) => {\n        node.textContent = format(latest);\n      },\n      onComplete: () => {\n        node.textContent = final;\n      }\n    });\n    return () => controls.stop();\n  }, [run, reduced, delay, stat.value, format, final]);\n  return <>\n      <span className=\"sr-only\">\n        {stat.prefix}\n        {final}\n        {stat.suffix}\n      </span>\n      <span aria-hidden=\"true\" className=\"flex items-baseline text-4xl font-semibold tracking-tight tabular-nums sm:text-5xl\">\n        {stat.prefix}\n        {\n    /* The final value reserves the width so nothing moves while the digits count. */\n  }\n        <span className=\"relative\">\n          <span className=\"invisible\">{final}</span>\n          <span ref={live} className=\"absolute inset-0\">\n            {final}\n          </span>\n        </span>\n        {stat.suffix ? <span className=\"text-2xl text-muted-foreground sm:text-3xl\">{stat.suffix}</span> : null}\n      </span>\n    </>;\n}\nfunction StatsBandTrend({ values, run, delay }) {\n  const min = Math.min(...values);\n  const span = Math.max(...values) - min || 1;\n  const path = values.map((value, index) => `${index ? \"L\" : \"M\"}${(index / (values.length - 1) * 100).toFixed(2)} ${(30 - (value - min) / span * 26).toFixed(2)}`).join(\" \");\n  return <motion.div\n    aria-hidden=\"true\"\n    initial={{ clipPath: \"inset(-4px 100% -4px 0)\" }}\n    animate={{ clipPath: run ? \"inset(-4px 0% -4px 0)\" : \"inset(-4px 100% -4px 0)\" }}\n    transition={{ duration: 1.2, ease: statsBandEase, delay: delay + statsBandDuration * 0.5 }}\n  >\n      <svg viewBox=\"0 0 100 32\" preserveAspectRatio=\"none\" className=\"h-8 w-full overflow-visible text-primary\">\n        <path\n    d={path}\n    fill=\"none\"\n    stroke=\"currentColor\"\n    strokeWidth=\"2\"\n    strokeLinecap=\"round\"\n    strokeLinejoin=\"round\"\n    vectorEffect=\"non-scaling-stroke\"\n  />\n      </svg>\n    </motion.div>;\n}\nfunction StatsBand() {\n  const list = useRef(null);\n  const inView = useInView(list, { once: true, amount: 0.4 });\n  return <MotionConfig reducedMotion=\"user\">\n      <Section aria-label=\"Key numbers\">\n        <Container>\n          <Stack gap=\"2xl\">\n            <SectionHeader title=\"The numbers behind the work\" description=\"One line on where these figures come from.\" />\n            <dl ref={list} className=\"grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2 lg:grid-cols-4\">\n              {statsBandItems.map((stat, index) => {\n    const delay = index * statsBandStagger;\n    return <div key={stat.label} className=\"flex flex-col gap-3 bg-background p-6 sm:p-8\">\n                    <dt className=\"text-sm text-muted-foreground\">{stat.label}</dt>\n                    <dd>\n                      <StatsBandNumber stat={stat} run={inView} delay={delay} />\n                    </dd>\n                    {stat.detail ? <dd className=\"text-sm text-muted-foreground\">{stat.detail}</dd> : null}\n                    {statsBandWithTrends ? <dd className=\"mt-auto h-8\">{stat.trend ? <StatsBandTrend values={stat.trend} run={inView} delay={delay} /> : null}</dd> : null}\n                  </div>;\n  })}\n            </dl>\n          </Stack>\n        </Container>\n      </Section>\n    </MotionConfig>;\n}\n"
+	},
+	{
 		"name": "faq",
 		"category": "marketing",
-		"description": "Narrow centered FAQ using Accordion.",
+		"description": "Narrow centered FAQ using Accordion. For up to about eight questions.",
 		"notes": "",
 		"entry": "Faq",
 		"imports": {
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Accordion",
 				"AccordionContent",
@@ -222,6 +453,47 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 		"body": "const faqItems = [\n  { question: \"A question real visitors ask?\", answer: \"A direct answer in two or three sentences.\" },\n  { question: \"A question real visitors ask?\", answer: \"A direct answer in two or three sentences.\" },\n  { question: \"A question real visitors ask?\", answer: \"A direct answer in two or three sentences.\" },\n  { question: \"A question real visitors ask?\", answer: \"A direct answer in two or three sentences.\" }\n];\nfunction Faq() {\n  return <Section>\n      <Container size=\"sm\">\n        <Stack gap=\"xl\">\n          <SectionHeader title=\"Questions\" align=\"center\" />\n          <Accordion type=\"single\" collapsible className=\"w-full\">\n            {faqItems.map((item, index) => <AccordionItem key={index} value={`faq-${index}`}>\n                <AccordionTrigger className=\"text-left text-base\">{item.question}</AccordionTrigger>\n                <AccordionContent className=\"text-muted-foreground\">{item.answer}</AccordionContent>\n              </AccordionItem>)}\n          </Accordion>\n        </Stack>\n      </Container>\n    </Section>;\n}\n"
 	},
 	{
+		"name": "faq-topics",
+		"category": "marketing",
+		"description": "FAQ for many questions: a topic rail with a gliding highlight (a scrolling row on phones), a search field that filters every topic and highlights matches, and a way to ask when nothing matches.",
+		"notes": "Use faq or faq-topics, not both.",
+		"entry": "FaqTopics",
+		"imports": {
+			"reactNamespace": false,
+			"react": [
+				"useMemo",
+				"useState"
+			],
+			"lucide": [
+				"Search"
+			],
+			"motion": [
+				"AnimatePresence",
+				"MotionConfig",
+				"motion"
+			],
+			"kit": [
+				"Accordion",
+				"AccordionContent",
+				"AccordionItem",
+				"AccordionTrigger",
+				"Button",
+				"Container",
+				"Input",
+				"Section",
+				"SectionHeader",
+				"Stack"
+			]
+		},
+		"declarations": [
+			"faqTopics",
+			"faqTopicsEase",
+			"faqTopicsHighlight",
+			"FaqTopics"
+		],
+		"body": "const faqTopics = [\n  {\n    id: \"getting-started\",\n    label: \"Getting started\",\n    items: [\n      { question: \"A question real visitors ask?\", answer: \"A direct answer in two or three sentences.\" },\n      { question: \"Another question about getting started?\", answer: \"A direct answer in two or three sentences.\" }\n    ]\n  },\n  {\n    id: \"pricing\",\n    label: \"Pricing and payment\",\n    items: [\n      { question: \"A question about price?\", answer: \"A direct answer in two or three sentences.\" },\n      { question: \"A question about paying?\", answer: \"A direct answer in two or three sentences.\" }\n    ]\n  },\n  {\n    id: \"support\",\n    label: \"Support\",\n    items: [\n      { question: \"A question about getting help?\", answer: \"A direct answer in two or three sentences.\" },\n      { question: \"A question about response times?\", answer: \"A direct answer in two or three sentences.\" }\n    ]\n  }\n];\nconst faqTopicsEase = [0.2, 0, 0, 1];\nfunction faqTopicsHighlight(text, query) {\n  if (!query) return text;\n  const escaped = query.replace(/[.*+?^$|()[\\]{}\\\\]/g, \"\\\\$&\");\n  const pattern = new RegExp(\"(\" + escaped + \")\", \"gi\");\n  return text.split(pattern).map(\n    (part, index) => index % 2 === 1 ? <mark key={index} className=\"rounded-sm bg-primary/15 px-0.5 text-foreground\">\n        {part}\n      </mark> : part\n  );\n}\nfunction FaqTopics() {\n  const [topicId, setTopicId] = useState(faqTopics[0].id);\n  const [query, setQuery] = useState(\"\");\n  const search = query.trim();\n  const results = useMemo(() => {\n    if (!search) return faqTopics.find((topic) => topic.id === topicId).items.map((item) => ({ ...item, topic: null }));\n    const needle = search.toLowerCase();\n    return faqTopics.flatMap(\n      (topic) => topic.items.filter((item) => `${item.question} ${item.answer}`.toLowerCase().includes(needle)).map((item) => ({ ...item, topic: topic.label }))\n    );\n  }, [search, topicId]);\n  return <MotionConfig reducedMotion=\"user\">\n      <Section id=\"faq\">\n        <Container>\n          <Stack gap=\"2xl\">\n            <SectionHeader\n    title=\"Questions\"\n    description=\"Answers to what people ask most before they get in touch.\"\n    actions={<div className=\"relative w-full sm:w-72\">\n                  <Search className=\"pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground\" aria-hidden=\"true\" />\n                  <Input\n      type=\"search\"\n      value={query}\n      onChange={(event) => setQuery(event.target.value)}\n      placeholder=\"Search questions\"\n      aria-label=\"Search questions\"\n      className=\"pl-9\"\n    />\n                </div>}\n  />\n            <div className=\"grid gap-8 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-12\">\n              <nav aria-label=\"Question topics\" className={`transition-opacity duration-200 ${search ? \"opacity-50\" : \"\"}`}>\n                <ul className=\"-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0\">\n                  {faqTopics.map((topic) => {\n    const current = !search && topic.id === topicId;\n    return <li key={topic.id} className=\"relative shrink-0\">\n                        {current ? <motion.span\n      layoutId=\"faq-topics-highlight\"\n      className=\"absolute inset-0 rounded-md bg-muted\"\n      transition={{ type: \"spring\", duration: 0.35, bounce: 0 }}\n    /> : null}\n                        <button\n      type=\"button\"\n      aria-current={current ? \"true\" : void 0}\n      onClick={() => {\n        setQuery(\"\");\n        setTopicId(topic.id);\n      }}\n      className={`relative w-full whitespace-nowrap rounded-md px-3 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${current ? \"font-medium text-foreground\" : \"text-muted-foreground hover:text-foreground\"}`}\n    >\n                          {topic.label}\n                          <span className=\"ml-2 tabular-nums text-muted-foreground\">{topic.items.length}</span>\n                        </button>\n                      </li>;\n  })}\n                </ul>\n              </nav>\n              <AnimatePresence mode=\"popLayout\" initial={false}>\n                <motion.div\n    key={search ? \"search\" : topicId}\n    initial={{ opacity: 0, y: 8 }}\n    animate={{ opacity: 1, y: 0 }}\n    exit={{ opacity: 0, y: -8, transition: { duration: 0.15, ease: \"easeOut\" } }}\n    transition={{ duration: 0.3, ease: faqTopicsEase }}\n    className=\"min-w-0\"\n  >\n                  {results.length > 0 ? <Accordion type=\"single\" collapsible className=\"w-full border-t\">\n                      {results.map((item, index) => <AccordionItem key={`${item.question}-${index}`} value={`faq-${index}`}>\n                          <AccordionTrigger className=\"text-left text-base\">\n                            <span className=\"flex flex-col gap-1\">\n                              {item.topic ? <span className=\"text-xs font-normal text-muted-foreground\">{item.topic}</span> : null}\n                              <span>{faqTopicsHighlight(item.question, search)}</span>\n                            </span>\n                          </AccordionTrigger>\n                          <AccordionContent className=\"text-base text-muted-foreground\">{faqTopicsHighlight(item.answer, search)}</AccordionContent>\n                        </AccordionItem>)}\n                    </Accordion> : <div className=\"flex flex-col items-start gap-3 rounded-lg border border-dashed p-8\">\n                      <p className=\"font-medium\">No answers match “{search}”</p>\n                      <p className=\"text-sm text-muted-foreground\">Try a shorter word, or ask us directly.</p>\n                      <Button variant=\"outline\" size=\"sm\" asChild>\n                        <a href=\"#contact\">Ask a question</a>\n                      </Button>\n                    </div>}\n                </motion.div>\n              </AnimatePresence>\n            </div>\n          </Stack>\n        </Container>\n      </Section>\n    </MotionConfig>;\n}\n"
+	},
+	{
 		"name": "cta-band",
 		"category": "marketing",
 		"description": "Primary-colored closing band: one line, one sentence, one action.",
@@ -231,6 +503,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Container",
@@ -257,6 +530,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"MapPin",
 				"Phone"
 			],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Card",
@@ -297,6 +571,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Container",
 				"Separator"
@@ -341,6 +616,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"SquareTerminal",
 				"Trash2"
 			],
+			"motion": [],
 			"kit": [
 				"Avatar",
 				"AvatarFallback",
@@ -409,6 +685,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"GalleryVerticalEnd",
 				"Search"
 			],
+			"motion": [],
 			"kit": [
 				"Breadcrumb",
 				"BreadcrumbItem",
@@ -464,6 +741,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"Users",
 				"Wallet"
 			],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Card",
@@ -500,6 +778,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Breadcrumb",
 				"BreadcrumbItem",
@@ -529,6 +808,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"TrendingDown",
 				"TrendingUp"
 			],
+			"motion": [],
 			"kit": [
 				"Badge",
 				"Grid",
@@ -558,6 +838,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 				"Plus",
 				"Search"
 			],
+			"motion": [],
 			"kit": [
 				"Badge",
 				"Button",
@@ -604,6 +885,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Input",
@@ -645,6 +927,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"lucide": [
 				"Plus"
 			],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Dialog",
@@ -676,6 +959,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"AlertDialog",
 				"AlertDialogAction",
@@ -706,6 +990,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"reactNamespace": false,
 			"react": [],
 			"lucide": [],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Card",
@@ -746,6 +1031,7 @@ export const UI_BLOCKS: readonly UiBlock[] = [
 			"lucide": [
 				"GalleryVerticalEnd"
 			],
+			"motion": [],
 			"kit": [
 				"Button",
 				"Card",

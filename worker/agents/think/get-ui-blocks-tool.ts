@@ -23,12 +23,14 @@ const DESCRIPTION = [
 function mergeImports(blocks: readonly UiBlock[]): string {
 	const react = new Set<string>();
 	const lucide = new Set<string>();
+	const motion = new Set<string>();
 	const kit = new Set<string>();
 	let reactNamespace = false;
 	for (const block of blocks) {
 		reactNamespace ||= block.imports.reactNamespace;
 		block.imports.react.forEach((name) => react.add(name));
 		block.imports.lucide.forEach((name) => lucide.add(name));
+		block.imports.motion.forEach((name) => motion.add(name));
 		block.imports.kit.forEach((name) => kit.add(name));
 	}
 	// toast() only shows anything once <Toaster /> is rendered at the app root.
@@ -37,6 +39,7 @@ function mergeImports(blocks: readonly UiBlock[]): string {
 	if (reactNamespace) lines.push('import * as React from "react";');
 	if (react.size) lines.push(`import { ${[...react].sort().join(', ')} } from "react";`);
 	if (lucide.size) lines.push(`import { ${[...lucide].sort().join(', ')} } from "lucide-react";`);
+	if (motion.size) lines.push(`import { ${[...motion].sort().join(', ')} } from "motion/react";`);
 	if (kit.size) lines.push(`import { ${[...kit].sort().join(', ')} } from "./vendor/ui-kit.js";`);
 	return lines.join('\n');
 }
@@ -73,6 +76,11 @@ export function createGetUiBlocksTool(): Tool {
 					'Paste `code` into public/app.jsx, merging its import lines with any you already have (a name imported twice is a syntax error).',
 					'Render the entries in page order inside your App, e.g. function App() { return (<><MarketingHeader /><main><HeroSplit /></main><SiteFooter /><Toaster /></>); }',
 					'Replace every placeholder (headings, copy, data arrays, "Brand", images) with real content for this brief. Keep the structure, layout primitives and token classes; adjust content, not spacing.',
+					...(blocks.some((block) => block.imports.motion.length > 0)
+						? [
+								'These blocks animate with "motion/react". scaffold_ui_kit maps it in the import map of public/index.html; if the browser cannot resolve "motion/react", call scaffold_ui_kit again. Keep the animations as written: they already respect reduced motion.',
+							]
+						: []),
 				],
 			});
 		},

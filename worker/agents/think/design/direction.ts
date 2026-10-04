@@ -24,7 +24,12 @@ export const MARKETING_BLOCK_NAMES = MARKETING_BLOCKS.map((block) => block.name)
 
 const HEADER = 'marketing-header';
 const FOOTER = 'site-footer';
-const HEROES: readonly string[] = ['hero-split', 'hero-centered'];
+const HEROES: readonly string[] = MARKETING_BLOCK_NAMES.filter((name) => name.startsWith('hero-'));
+/** Body blocks that do the same job; a page keeps the first of each group it lists. */
+const ALTERNATIVES: readonly (readonly string[])[] = [
+	['process-steps', 'process-interactive'],
+	['faq', 'faq-topics'],
+];
 const DEFAULT_MIDDLE: readonly string[] = ['feature-grid', 'contact'];
 
 export interface DesignDirection {
@@ -44,13 +49,19 @@ export interface DesignDirection {
 
 /**
  * A website's sections in a valid order: header, one hero, the body sections
- * once each in the order given, footer. Unknown and repeated names are dropped.
+ * once each in the order given, footer. Unknown and repeated names, and a
+ * second block from the same group of alternatives, are dropped.
  */
 export function normaliseSections(names: readonly string[]): string[] {
 	const known = new Set<string>(MARKETING_BLOCK_NAMES);
 	const unique = [...new Set(names)].filter((name) => known.has(name));
 	const hero = unique.find((name) => HEROES.includes(name)) ?? HEROES[0];
-	const middle = unique.filter((name) => name !== HEADER && name !== FOOTER && !HEROES.includes(name));
+	const middle = unique
+		.filter((name) => name !== HEADER && name !== FOOTER && !HEROES.includes(name))
+		.filter((name, index, body) => {
+			const group = ALTERNATIVES.find((alternatives) => alternatives.includes(name));
+			return !group || body.findIndex((other) => group.includes(other)) === index;
+		});
 	return [HEADER, hero, ...(middle.length > 0 ? middle : DEFAULT_MIDDLE), FOOTER];
 }
 

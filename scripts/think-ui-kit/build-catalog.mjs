@@ -2,7 +2,8 @@
 // - UI_BLOCKS: vendored shadcn/ui registry blocks (MIT) and the authored blocks
 //   in ./blocks/*.jsx, converted to JSX that runs in a Think space (one
 //   public/app.jsx, components from "./vendor/ui-kit.js", icons from
-//   "lucide-react"), with imports split out so several blocks can be merged.
+//   "lucide-react", animation from "motion/react"), with imports split out so
+//   several blocks can be merged.
 // - UI_KIT_EXPORTS, THEME_PRESETS, RADIUS_PRESETS and TAILWIND_RUNTIME_CONFIG,
 //   read from the built kit and its config so the tools can never drift from it.
 import fs from 'node:fs';
@@ -22,20 +23,42 @@ const BLOCKS = [
 		name: 'marketing-header',
 		category: 'marketing',
 		source: 'marketing-header.jsx',
-		description: 'Sticky site header: brand, a few links on desktop, a Sheet slide-out menu on mobile, one call to action.',
+		description:
+			'Sticky site header that turns solid on scroll: brand, section links with a highlight that glides between them and marks the section in view, a Sheet menu on mobile, one call to action.',
+		notes: "Point each link's href at a section id that exists on the page.",
 	},
 	{
 		name: 'hero-split',
 		category: 'marketing',
 		source: 'hero-split.jsx',
-		description: 'Hero with headline, supporting sentence and two actions beside an image (4:3).',
-		notes: 'Set heroSplitImage to a search_images result, or drop the image column for a typographic hero.',
+		description: 'Hero with headline, supporting sentence and two actions beside a photo (4:3) that unfolds into place. For a place, a craft or a physical product.',
+		notes: 'Set heroSplitImage to a search_images result that shows the real subject.',
 	},
 	{
-		name: 'hero-centered',
+		name: 'hero-product',
 		category: 'marketing',
-		source: 'hero-centered.jsx',
-		description: 'Centered typographic hero: headline, supporting sentence, two actions.',
+		source: 'hero-product.jsx',
+		description:
+			'Centered headline and actions over a soft fade, with a product window that rises from the bottom edge. Its sample screen (sidebar, KPI cards, a bar chart that grows in, recent rows) shows software at work. For software, apps and online tools.',
+		notes:
+			'Rewrite HeroProductScreen (nav items, stats, rows) as this product\'s own main screen, or set heroProductImage to a real screenshot. heroProductAnnouncement renders only when its label is set.',
+	},
+	{
+		name: 'hero-workflow',
+		category: 'marketing',
+		source: 'hero-workflow.jsx',
+		description:
+			'Split hero: copy beside a live panel that runs the business\'s process step by step (each step waits, works, then reports its result; a line fills between steps), cycling through sample cases with a "Next example" button. For services and products whose value is in how the work flows.',
+		notes:
+			'Replace heroWorkflowSteps with the real steps (3 to 5) and heroWorkflowRuns with realistic cases, one result per step. Pauses off screen; with reduced motion each case shows finished.',
+	},
+	{
+		name: 'hero-statement',
+		category: 'marketing',
+		source: 'hero-statement.jsx',
+		description:
+			'Full-screen typographic hero: a very large statement that rises in word by word, then a ruled row with the supporting sentence and actions, and an optional row of real customer names. Optional full-bleed photo behind the type. For studios, agencies, firms and confident brands.',
+		notes: 'Keep heroStatementTitle under about ten words. heroStatementNames stays empty unless the brief names real customers.',
 	},
 	{
 		name: 'feature-grid',
@@ -56,10 +79,42 @@ const BLOCKS = [
 		description: 'Three plan cards with price, inclusions and a call to action; one plan highlighted.',
 	},
 	{
+		name: 'process-steps',
+		category: 'marketing',
+		source: 'process-steps.jsx',
+		description:
+			'"How it works" section: 3 to 5 numbered steps joined by a line that draws from one to the next as the section scrolls into view (across on desktop, down on phones), each with a title, a sentence and what the customer has after it.',
+		notes: 'Only for a real sequence. The section id is how-it-works; use process-steps or process-interactive, not both.',
+	},
+	{
+		name: 'process-interactive',
+		category: 'marketing',
+		source: 'process-interactive.jsx',
+		description:
+			'"How it works" section people can explore: a list of steps beside a large panel. Choosing a step glides the highlight to it and swaps the panel (the step\'s image, or its details as a checklist). Plays through once on its own while in view and stops when the visitor takes over.',
+		notes: 'Give steps an image when there is something real to show. The section id is how-it-works; use process-steps or process-interactive, not both.',
+	},
+	{
+		name: 'stats-band',
+		category: 'marketing',
+		source: 'stats-band.jsx',
+		description:
+			'Hairline grid of 3 or 4 headline numbers that count up when scrolled into view, each with a label, a line of context and an optional small trend line that draws in.',
+		notes: 'Only with the business\'s real figures; never invent numbers. Remove `trend` from a stat with no history to show.',
+	},
+	{
 		name: 'faq',
 		category: 'marketing',
 		source: 'faq.jsx',
-		description: 'Narrow centered FAQ using Accordion.',
+		description: 'Narrow centered FAQ using Accordion. For up to about eight questions.',
+	},
+	{
+		name: 'faq-topics',
+		category: 'marketing',
+		source: 'faq-topics.jsx',
+		description:
+			'FAQ for many questions: a topic rail with a gliding highlight (a scrolling row on phones), a search field that filters every topic and highlights matches, and a way to ask when nothing matches.',
+		notes: 'Use faq or faq-topics, not both.',
 	},
 	{
 		name: 'cta-band',
@@ -188,8 +243,8 @@ function sourceFiles(block) {
 	return [...files.filter((f) => !f.path.endsWith('page.tsx')), ...files.filter((f) => f.path.endsWith('page.tsx'))];
 }
 
-async function convert(block, kitExports, lucideExports) {
-	const imports = { react: new Set(), reactNamespace: false, lucide: new Set(), kit: new Set() };
+async function convert(block, kitExports, lucideExports, motionExports) {
+	const imports = { react: new Set(), reactNamespace: false, lucide: new Set(), motion: new Set(), kit: new Set() };
 	const parts = [];
 	let defaultExport = null;
 
@@ -199,6 +254,7 @@ async function convert(block, kitExports, lucideExports) {
 			if (KIT_SPECIFIER.test(spec)) parseNamed(clause).forEach((n) => imports.kit.add(n));
 			else if (spec === 'lucide-react') parseNamed(clause).forEach((n) => imports.lucide.add(n));
 			else if (spec === 'react') parseNamed(clause).forEach((n) => imports.react.add(n));
+			else if (spec === 'motion/react') parseNamed(clause).forEach((n) => imports.motion.add(n));
 			else if (!LOCAL_BLOCK_SPECIFIER.test(spec)) throw new Error(`${block.name} (${file.path}): unsupported import "${spec}"`);
 			// Block-local components are concatenated into the same snippet.
 			return '';
@@ -243,6 +299,10 @@ async function convert(block, kitExports, lucideExports) {
 	for (const name of imports.lucide) {
 		if (!lucideExports.has(name)) throw new Error(`${block.name}: "${name}" is not exported by lucide-react`);
 	}
+	for (const name of imports.motion) {
+		if (!motionExports.has(name)) throw new Error(`${block.name}: "${name}" is not exported by motion/react`);
+		if (kitExports.has(name) || imports.lucide.has(name)) throw new Error(`${block.name}: motion's "${name}" collides with a kit or icon import`);
+	}
 
 	return {
 		name: block.name,
@@ -254,6 +314,7 @@ async function convert(block, kitExports, lucideExports) {
 			reactNamespace: imports.reactNamespace,
 			react: [...imports.react].sort(),
 			lucide: [...imports.lucide].sort(),
+			motion: [...imports.motion].sort(),
 			kit: [...imports.kit].sort(),
 		},
 		declarations: [...body.matchAll(DECLARATION_RE)].map((m) => m[1]),
@@ -279,8 +340,9 @@ function tailwindRuntimeConfig() {
 
 const kitExports = new Set(Object.keys(await import(kitFile)));
 const lucideExports = new Set(Object.keys(await import('lucide-react')));
+const motionExports = new Set(Object.keys(await import('motion/react')));
 const blocks = [];
-for (const block of BLOCKS) blocks.push(await convert(block, kitExports, lucideExports));
+for (const block of BLOCKS) blocks.push(await convert(block, kitExports, lucideExports, motionExports));
 
 const owners = new Map();
 for (const block of blocks) {
@@ -301,7 +363,7 @@ export interface UiBlock {
 	notes: string;
 	/** Top-level component(s) the block renders. */
 	entry: string;
-	imports: { reactNamespace: boolean; react: string[]; lucide: string[]; kit: string[] };
+	imports: { reactNamespace: boolean; react: string[]; lucide: string[]; motion: string[]; kit: string[] };
 	/** Top-level names the block declares; two merged blocks must not share one. */
 	declarations: string[];
 	body: string;
@@ -321,5 +383,5 @@ fs.writeFileSync(outFile, ts);
 
 console.log(`Catalog -> ${path.relative(process.cwd(), outFile)}`);
 console.log(`  ${kitExports.size} kit exports, themes: ${themePresets().join(' ')}, radius: ${radiusPresets().map((r) => r.name).join(' ')}`);
-for (const b of blocks) console.log(`  ${b.name.padEnd(17)} entry ${b.entry}`);
+for (const b of blocks) console.log(`  ${b.name.padEnd(20)} entry ${b.entry}`);
 if (clashes.length) console.log(`  name clashes (blocks that cannot be merged together): ${clashes.map(([n, bs]) => `${n} [${bs.join(', ')}]`).join('; ')}`);
