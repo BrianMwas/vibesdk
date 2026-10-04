@@ -13,6 +13,13 @@ export const DEFAULT_THINK_MODEL_ID = 'google-ai-studio/gemini-3.6-flash';
 const KNOWN_THINK_MODELS: { match: string; name: string; creditCost: number; contextSize: number }[] = [
 	{ match: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', creditCost: 2, contextSize: 1_048_576 },
 	{ match: 'kimi-k3', name: 'Kimi K3', creditCost: 12, contextSize: 1_048_576 },
+	{ match: 'gpt-5.2', name: 'GPT-5.2', creditCost: 7, contextSize: 400_000 },
+	{ match: 'gpt-5.1', name: 'GPT-5.1', creditCost: 5, contextSize: 400_000 },
+	{ match: 'gpt-5-mini', name: 'GPT-5 Mini', creditCost: 1, contextSize: 400_000 },
+	// Claude is priced by family, at the rates in `config.types.ts`.
+	{ match: 'claude-opus', name: 'Claude Opus', creditCost: 20, contextSize: 200_000 },
+	{ match: 'claude-sonnet', name: 'Claude Sonnet', creditCost: 12, contextSize: 200_000 },
+	{ match: 'claude-haiku', name: 'Claude Haiku', creditCost: 4, contextSize: 200_000 },
 ];
 
 /** Used for an id we have no entry for: priced high so rate limits stay conservative. */

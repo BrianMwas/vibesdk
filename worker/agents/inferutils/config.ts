@@ -126,7 +126,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
         name: AIModels.OPENAI_5_MINI,
         max_tokens: 2000,
         fallbackModel: AIModels.OPENAI_5_MINI,
-        temperature: 0.6,
+        temperature: 1,
     },
     blueprint: {
         name: AIModels.OPENAI_5,

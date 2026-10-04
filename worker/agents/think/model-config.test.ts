@@ -21,8 +21,14 @@ describe('resolveThinkModel', () => {
 		expect(model.config).toMatchObject({ name: 'Kimi K3', creditCost: 12, contextSize: 1_048_576 });
 	});
 
+	it('prices GPT and Claude models from the shared rates', () => {
+		expect(resolveThinkModel({ THINK_MODEL_ID: 'openai/gpt-5.2' }).config).toMatchObject({ name: 'GPT-5.2', provider: 'openai', creditCost: 7 });
+		expect(resolveThinkModel({ THINK_MODEL_ID: 'anthropic/claude-sonnet-5' }).config).toMatchObject({ name: 'Claude Sonnet', provider: 'anthropic', creditCost: 12 });
+		expect(resolveThinkModel({ THINK_MODEL_ID: 'anthropic/claude-opus-5-5' }).config).toMatchObject({ name: 'Claude Opus', creditCost: 20 });
+	});
+
 	it('accepts a model it has no entry for, priced conservatively', () => {
-		const model = resolveThinkModel({ THINK_MODEL_ID: 'anthropic/claude-sonnet-5-5' });
-		expect(model.config).toMatchObject({ name: 'anthropic/claude-sonnet-5-5', provider: 'anthropic', creditCost: 12 });
+		const model = resolveThinkModel({ THINK_MODEL_ID: 'mistral/mistral-large-3' });
+		expect(model.config).toMatchObject({ name: 'mistral/mistral-large-3', provider: 'mistral', creditCost: 12 });
 	});
 });
