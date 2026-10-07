@@ -41,6 +41,7 @@ declare namespace Cloudflare {
 		ENABLE_MODE_SWITCHER: string;
 		ENABLE_USER_ACCOUNT_DEPLOY: string;
 		EMBEDDER_USER_IDS: string;
+		EMBEDDER_WEBHOOK_SECRET: string;
 		CodeGenObject: DurableObjectNamespace<import("./worker/index").CodeGeneratorAgent>;
 		Sandbox: DurableObjectNamespace<import("./worker/index").UserAppSandboxService>;
 		DORateLimitStore: DurableObjectNamespace<import("./worker/index").DORateLimitStore>;

@@ -31,6 +31,11 @@ export function setupCodegenRoutes(app: Hono<AppEnv>): void {
     // Only the app owner should be able to connect for editing purposes
     app.get('/api/agent/:agentId/connect', setAuthLevel(AuthConfig.ownerOnly), adaptController(CodingAgentController, CodingAgentController.connectToExistingAgent));
 
+    // For an embedding platform with no WebSocket open: ask for a change, and
+    // publish. Both return at once; progress reaches the embedder callback.
+    app.post('/api/agent/:agentId/messages', setAuthLevel(AuthConfig.ownerOnly), adaptController(CodingAgentController, CodingAgentController.sendMessage));
+    app.post('/api/agent/:agentId/publish', setAuthLevel(AuthConfig.ownerOnly), adaptController(CodingAgentController, CodingAgentController.publish));
+
     // Deploy an ephemeral SANDBOX preview. Intentionally `authenticated` (not
     // `ownerOnly`): public-app previews must be viewer-triggerable, while
     // private apps are owner-gated inside the controller. This is sandbox-only

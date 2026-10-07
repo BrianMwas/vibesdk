@@ -8,6 +8,7 @@ import { mayChooseDeploymentName, parseEmbedderContext, type EmbedderContext } f
 import { getAgentStub, getTemplateForQuery } from '../../../agents';
 import {
     AgentConnectionData,
+    AgentRequestAccepted,
     AgentPreviewResponse,
     CodeGenArgs,
     MAX_AGENT_QUERY_LENGTH,
@@ -28,6 +29,9 @@ import { hasTicketParam } from '../../../middleware/auth/ticketAuth';
 import { checkUsageAndBalance, getUserGateway } from '../../../services/rate-limit/usageChecker';
 import { readTokenCookie } from '../../../utils/oauthCookie';
 import { UsageLimitExceededError } from 'shared/types/errors';
+
+/** Longest change request accepted over HTTP; the chat UI has no tighter bound. */
+const MAX_EMBEDDER_MESSAGE_CHARS = 8_000;
 
 const defaultCodeGenArgs: Partial<CodeGenArgs> = {
     language: 'typescript',
@@ -127,6 +131,9 @@ export class CodingAgentController extends BaseController {
                 // The dispatch namespace is shared, so the name decides which Worker is overwritten.
                 if (parsed.value.deploymentName && !mayChooseDeploymentName(user.id, env.EMBEDDER_USER_IDS)) {
                     return CodingAgentController.createErrorResponse('This account may not choose a deployment name', 403);
+                }
+                if (parsed.value.callbackUrl && !mayChooseDeploymentName(user.id, env.EMBEDDER_USER_IDS)) {
+                    return CodingAgentController.createErrorResponse('This account may not set a callback URL', 403);
                 }
                 embedderContext = parsed.value;
             }
@@ -276,6 +283,7 @@ export class CodingAgentController extends BaseController {
                 try {
                     await agentPromise;
                     this.logger.info(`Agent ${agentId} initialized successfully`);
+                    if (embedderContext?.autoStart) await agentInstance.startGeneration();
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
                     this.logger.error(`Agent ${agentId} initialization failed`, error);
@@ -426,6 +434,75 @@ export class CodingAgentController extends BaseController {
         } catch (error) {
             this.logger.error('Error connecting to existing agent', error);
             return CodingAgentController.handleError(error, 'connect to existing agent') as ControllerResponse<ApiResponse<AgentConnectionData>>;
+        }
+    }
+
+    /**
+     * A change request from a platform that keeps no WebSocket open. It is
+     * queued exactly like a chat message, and starts a build if the agent is
+     * idle; progress reaches the platform's embedder callback.
+     */
+    static async sendMessage(
+        request: Request,
+        env: Env,
+        _: ExecutionContext,
+        context: RouteContext
+    ): Promise<ControllerResponse<ApiResponse<AgentRequestAccepted>>> {
+        try {
+            const agentId = context.pathParams.agentId;
+            if (!agentId) {
+                return CodingAgentController.createErrorResponse<AgentRequestAccepted>('Missing agent ID parameter', 400);
+            }
+            const body = await CodingAgentController.parseJsonBody<{ message?: unknown }>(request);
+            if (!body.success) return body.response as ControllerResponse<ApiResponse<AgentRequestAccepted>>;
+            const message = body.data?.message;
+            if (typeof message !== 'string' || message.trim().length === 0 || message.length > MAX_EMBEDDER_MESSAGE_CHARS) {
+                return CodingAgentController.createErrorResponse<AgentRequestAccepted>(
+                    `message must be between 1 and ${MAX_EMBEDDER_MESSAGE_CHARS} characters`,
+                    400,
+                );
+            }
+
+            const agentInstance = await getAgentStub(env, agentId);
+            if (!(await agentInstance.isInitialized())) {
+                return CodingAgentController.createErrorResponse<AgentRequestAccepted>('Agent instance not found or not initialized', 404);
+            }
+            await agentInstance.handleUserInput(message);
+            return CodingAgentController.createSuccessResponse<AgentRequestAccepted>({ agentId, accepted: true });
+        } catch (error) {
+            this.logger.error('Error sending a message to the agent', error);
+            return CodingAgentController.handleError(error, 'send message') as ControllerResponse<ApiResponse<AgentRequestAccepted>>;
+        }
+    }
+
+    /**
+     * Publish to the platform's dispatch namespace, for a platform that keeps no
+     * WebSocket open. Returns at once; the outcome reaches the embedder callback.
+     */
+    static async publish(
+        _request: Request,
+        env: Env,
+        ctx: ExecutionContext,
+        context: RouteContext
+    ): Promise<ControllerResponse<ApiResponse<AgentRequestAccepted>>> {
+        try {
+            const agentId = context.pathParams.agentId;
+            if (!agentId) {
+                return CodingAgentController.createErrorResponse<AgentRequestAccepted>('Missing agent ID parameter', 400);
+            }
+            const agentInstance = await getAgentStub(env, agentId);
+            if (!(await agentInstance.isInitialized())) {
+                return CodingAgentController.createErrorResponse<AgentRequestAccepted>('Agent instance not found or not initialized', 404);
+            }
+            ctx.waitUntil(
+                agentInstance.deployToCloudflare('platform').catch((error: unknown) => {
+                    this.logger.error(`Publishing agent ${agentId} failed`, error);
+                }),
+            );
+            return CodingAgentController.createSuccessResponse<AgentRequestAccepted>({ agentId, accepted: true });
+        } catch (error) {
+            this.logger.error('Error publishing the agent', error);
+            return CodingAgentController.handleError(error, 'publish') as ControllerResponse<ApiResponse<AgentRequestAccepted>>;
         }
     }
 

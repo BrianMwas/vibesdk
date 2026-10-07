@@ -38,7 +38,8 @@ import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
 import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usageChecker';
-import type { CloudflareDeploymentErrorCode } from '../../../api/websocketTypes';
+import type { CloudflareDeploymentErrorCode, WebSocketMessageData, WebSocketMessageType } from '../../../api/websocketTypes';
+import { deliverEmbedderEvent, toEmbedderEvent, type EmbedderEvent } from '../embedder-events';
 
 /**
  * Minimal stub shape for the `ThinkAgent` DO (see `worker/agents/think/ThinkAgent.ts`).
@@ -182,6 +183,26 @@ export class ThinkCodingBehavior
 	}
 
 	// ──────────────────────────────────────────────────────────────
+	// Embedder progress
+
+	/** Everything the UI is told also reaches an embedding platform's callback, translated. */
+	public override broadcast<T extends WebSocketMessageType>(msg: T, data?: WebSocketMessageData<T>): void {
+		super.broadcast(msg, data);
+		const event = toEmbedderEvent(msg, data as Record<string, unknown> | undefined);
+		if (event) this.notifyEmbedder(event);
+	}
+
+	/** Posts to the embedder's callback, if it gave one. Fire and forget: delivery never blocks the build. */
+	private notifyEmbedder(event: EmbedderEvent): void {
+		const url = this.state.embedderContext?.callbackUrl;
+		const secret = this.env.EMBEDDER_WEBHOOK_SECRET;
+		if (!url || !secret) return;
+		void deliverEmbedderEvent({ url, secret, delivery: { agentId: this.getAgentId(), at: Date.now(), event } }).then((ok) => {
+			if (!ok) this.logger.warn('Embedder callback was not accepted', { type: event.type });
+		});
+	}
+
+	// ──────────────────────────────────────────────────────────────
 	// Initialize
 
 	async initialize(
@@ -230,7 +251,16 @@ export class ThinkCodingBehavior
 
 		const designStartedAt = performance.now();
 		const designDirection = await this.decideDesign(query, embedderContext?.seedFiles, embedderContext?.instructions);
-		if (designDirection) this.setState({ ...this.state, designDirection });
+		if (designDirection) {
+			this.setState({ ...this.state, designDirection });
+			this.notifyEmbedder({
+				type: 'design.chosen',
+				kind: designDirection.kind,
+				palette: designDirection.palette.name,
+				fonts: `${designDirection.fonts.heading.family} and ${designDirection.fonts.body.family}`,
+				sections: designDirection.sections ?? [],
+			});
+		}
 		const designDurationMs = performance.now() - designStartedAt;
 
 		const configureStartedAt = performance.now();
@@ -1003,7 +1033,9 @@ export class ThinkCodingBehavior
 	): Promise<{ deploymentUrl?: string; workersUrl?: string } | null> {
 		const userAccountDeployEnabled = this.env.ENABLE_USER_ACCOUNT_DEPLOY === 'true';
 
-		if (!userAccountDeployEnabled) {
+		// An embedding platform routes its own hostnames into the platform's
+		// dispatch namespace, so its sites always publish there.
+		if (!userAccountDeployEnabled || this.state.embedderContext) {
 			return this.deployThinkAppToPlatform();
 		}
 

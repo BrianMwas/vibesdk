@@ -25,6 +25,14 @@ describe('parseEmbedderContext', () => {
 		expect(parseEmbedderContext(full)).toEqual({ ok: true, value: full });
 	});
 
+	it('accepts an https callback and auto-start, and refuses any other callback', () => {
+		const withCallback = { ...valid, callbackUrl: 'https://speek.example/webhooks/vibesdk', autoStart: true };
+		expect(parseEmbedderContext(withCallback)).toEqual({ ok: true, value: withCallback });
+		for (const callbackUrl of ['http://speek.example/hook', 'https://user:pass@speek.example/hook', 'not a url']) {
+			expect(parseEmbedderContext({ ...valid, callbackUrl }).ok).toBe(false);
+		}
+	});
+
 	it('rejects a missing, empty or oversized instruction', () => {
 		expect(parseEmbedderContext({}).ok).toBe(false);
 		expect(parseEmbedderContext({ instructions: '' }).ok).toBe(false);

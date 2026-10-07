@@ -619,6 +619,18 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
     }
 
     /**
+     * Start the build with no WebSocket client, for a platform that embeds the
+     * builder and asked for `autoStart`. Mirrors GENERATE_ALL.
+     */
+    async startGeneration(): Promise<void> {
+        this.setState({ ...this.state, shouldBeGenerating: true });
+        if (this.behavior.isCodeGenerating()) return;
+        this.behavior.generateAllFiles().catch(error => {
+            this.logger().error('Error during embedded generation:', error);
+        });
+    }
+
+    /**
      * Handle user input during conversational code generation
      * Processes user messages and updates pendingUserInputs state
      */
