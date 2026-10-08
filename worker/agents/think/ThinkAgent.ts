@@ -74,6 +74,11 @@ export interface ThinkAgentConfig {
 	 * as the default target for the `get_browser_console_logs` tool.
 	 */
 	previewUrl?: string;
+	/**
+	 * Set for a session an embedding platform started: `ask_questions` takes one
+	 * question with two to four suggested answers, which the platform can relay.
+	 */
+	oneQuestionAtATime?: boolean;
 }
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -358,7 +363,8 @@ export class ThinkAgent extends Think<Env> {
 
 	override getTools(): ToolSet {
 		const ops = createSpaceWorkspaceOps(() => this.getSpaceStub());
-		const previewUrl = this.getConfig<ThinkAgentConfig>()?.previewUrl;
+		const config = this.getConfig<ThinkAgentConfig>();
+		const previewUrl = config?.previewUrl;
 		// Same names as Think's built-in workspace tools, so these SpaceDO-backed
 		// versions win the tool-merge. Bash is disabled via `workspaceBash`.
 		return {
@@ -376,7 +382,7 @@ export class ThinkAgent extends Think<Env> {
 			// Set the project's short display title (host observes the output).
 			set_title: createSetTitleTool(),
 			// Ask the user clarifying questions via a frontend popup.
-			ask_questions: createAskQuestionsTool(),
+			ask_questions: createAskQuestionsTool({ oneAtATime: config?.oneQuestionAtATime === true }),
 			// Client-side debugging via a real headless browser.
 			get_browser_console_logs: createBrowserConsoleLogsTool({
 				env: this.env,

@@ -13,6 +13,7 @@ export const EMBEDDER_LIMITS = {
 	seedFiles: 20,
 	seedPathChars: 200,
 	seedBytes: 200_000,
+	callbackUrlChars: 2_000,
 } as const;
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -58,8 +59,29 @@ export const embedderContextSchema = z
 		seedFiles: seedFilesSchema.optional(),
 		/** Fixed name for the deployed Worker, so the embedder can route to it. */
 		deploymentName: z.string().regex(DEPLOYMENT_NAME).optional(),
+		/**
+		 * Where progress is posted, signed with EMBEDDER_WEBHOOK_SECRET, so a
+		 * platform with no WebSocket open still sees the build, the preview and
+		 * the publish happen. See embedder-events.ts.
+		 */
+		callbackUrl: z
+			.string()
+			.max(EMBEDDER_LIMITS.callbackUrlChars)
+			.refine(isCallbackUrl, 'callbackUrl must be an https URL without credentials')
+			.optional(),
+		/** Start building as soon as the session exists, without waiting for a WebSocket client to ask. */
+		autoStart: z.boolean().optional(),
 	})
 	.strict();
+
+function isCallbackUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === 'https:' && url.username === '' && url.password === '';
+	} catch {
+		return false;
+	}
+}
 
 export type EmbedderContext = z.infer<typeof embedderContextSchema>;
 
@@ -85,7 +107,9 @@ export function toStoredContext(context: EmbedderContext): StoredEmbedderContext
 
 /**
  * Setting a deployment name lets a caller choose which Worker in the shared
- * dispatch namespace is overwritten, so only the platform's own account may.
+ * dispatch namespace is overwritten, and a callback URL makes this Worker post
+ * to an address of the caller's choosing, so only the platform's own account
+ * may set either.
  */
 export function mayChooseDeploymentName(userId: string, allowlist: string | undefined): boolean {
 	return (allowlist ?? '')
@@ -94,6 +118,20 @@ export function mayChooseDeploymentName(userId: string, allowlist: string | unde
 		.filter(Boolean)
 		.includes(userId);
 }
+
+/**
+ * How an embedded session asks. The platform answers on its owner's behalf, and
+ * passes on only what it cannot work out, so each question must be one it can
+ * answer from a short list.
+ */
+export const EMBEDDED_CLARIFY_STEPS: readonly string[] = [
+	'## Questions',
+	'The platform that started this session answers your questions for its user, and asks the user only what it cannot work out. Decide from the files it seeded and its instructions first: state any assumption you make in one line and carry on building.',
+	'Ask only when the answer would change the site a lot and nothing in those facts points either way. Then:',
+	'1. Call `ask_questions` with exactly one question, in plain words, with two to four suggested answers and a one or two word `about` (e.g. "colours", "pages", "main button").',
+	'2. End your turn. Do not write or edit files until the answer arrives as the next message.',
+	'Never ask about a fact you could take from the seeded files, and never ask several questions at once.',
+];
 
 /** The block appended to the system prompt. */
 export function renderEmbedderPrompt(context: StoredEmbedderContext): string {

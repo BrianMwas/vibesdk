@@ -150,6 +150,10 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
         });
         
         await this.saveToDatabase();
+
+        // Started here rather than by the caller: an embedding platform hangs up
+        // as soon as it has the agent id, and the build must not depend on it.
+        if (initArgs.embedderContext?.autoStart) this.generateInBackground();
         
         return this.state;
     }
@@ -619,6 +623,33 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
     }
 
     /**
+     * Run the build with no caller waiting on it, keeping the Durable Object
+     * alive until it ends. With no WebSocket open (an embedding platform), an
+     * idle DO is otherwise evicted within minutes, part way through the build.
+     */
+    private generateInBackground(): void {
+        this.setState({ ...this.state, shouldBeGenerating: true });
+        if (this.behavior.isCodeGenerating()) return;
+        this.keepAliveWhile(() => this.behavior.generateAllFiles())
+            .catch(error => {
+                this.logger().error('Error during background generation:', error);
+            })
+            .finally(() => {
+                if (!this.behavior.isCodeGenerating()) this.setState({ ...this.state, shouldBeGenerating: false });
+            });
+    }
+
+    /**
+     * Publish for a platform that keeps no WebSocket open. Returns at once; the
+     * outcome reaches the platform's embedder callback.
+     */
+    async publishInBackground(): Promise<void> {
+        this.keepAliveWhile(() => this.deployToCloudflare('platform')).catch(error => {
+            this.logger().error('Error during background publish:', error);
+        });
+    }
+
+    /**
      * Handle user input during conversational code generation
      * Processes user messages and updates pendingUserInputs state
      */
@@ -635,9 +666,7 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
             if (!this.behavior.isCodeGenerating()) {
                 // If idle, start generation process
                 this.logger().info('User input during IDLE state, starting generation');
-                this.behavior.generateAllFiles().catch(error => {
-                    this.logger().error('Error starting generation from user input:', error);
-                });
+                this.generateInBackground();
             }
 
         } catch (error) {
