@@ -119,6 +119,20 @@ export function mayChooseDeploymentName(userId: string, allowlist: string | unde
 		.includes(userId);
 }
 
+/**
+ * How an embedded session asks. The platform answers on its owner's behalf, and
+ * passes on only what it cannot work out, so each question must be one it can
+ * answer from a short list.
+ */
+export const EMBEDDED_CLARIFY_STEPS: readonly string[] = [
+	'## Questions',
+	'The platform that started this session answers your questions for its user, and asks the user only what it cannot work out. Decide from the files it seeded and its instructions first: state any assumption you make in one line and carry on building.',
+	'Ask only when the answer would change the site a lot and nothing in those facts points either way. Then:',
+	'1. Call `ask_questions` with exactly one question, in plain words, with two to four suggested answers and a one or two word `about` (e.g. "colours", "pages", "main button").',
+	'2. End your turn. Do not write or edit files until the answer arrives as the next message.',
+	'Never ask about a fact you could take from the seeded files, and never ask several questions at once.',
+];
+
 /** The block appended to the system prompt. */
 export function renderEmbedderPrompt(context: StoredEmbedderContext): string {
 	const instructions = context.instructions.replace(/<\/embedder-instructions>/gi, '<\\/embedder-instructions>');

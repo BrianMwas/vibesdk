@@ -25,31 +25,47 @@ export type ClarifyingQuestion = {
 	options?: string[];
 	allow_multiple?: boolean;
 	allow_custom?: boolean;
+	about?: string;
 };
 
-export function createAskQuestionsTool(): Tool {
+const question = z.object({
+	question: z.string().describe('The clarifying question to ask the user.'),
+	options: z.array(z.string()).optional().describe('Predefined answer options the user can choose from.'),
+	allow_multiple: z.boolean().optional().describe('When true, the user may select more than one predefined option.'),
+	allow_custom: z.boolean().optional().describe('When true, the user may enter a free-text answer not in options.'),
+});
+
+/**
+ * One question with two to four suggested answers, for a session an embedding
+ * platform started: the platform relays it, so it must fit on a card.
+ */
+const singleQuestion = z.object({
+	question: z.string().min(1).describe('The one clarifying question, in plain words.'),
+	options: z.array(z.string().min(1)).min(2).max(4).describe('Two to four suggested answers.'),
+	about: z.string().min(1).max(40).describe('What the question is about, in one or two words, e.g. "colours".'),
+});
+
+const SINGLE_DESCRIPTION = [
+	'Ask exactly one clarifying question, with two to four suggested answers, when the answer would change the result a lot and nothing you were given points either way.',
+	'',
+	'Then end your turn and wait: the answer arrives as the next message. Do not write or edit files until it does.',
+].join('\n');
+
+export function createAskQuestionsTool(options: { oneAtATime?: boolean } = {}): Tool {
+	if (options.oneAtATime) {
+		return tool({
+			description: SINGLE_DESCRIPTION,
+			inputSchema: z.object({ questions: z.array(singleQuestion).length(1).describe('Exactly one question.') }),
+			execute: async (args: { questions: ClarifyingQuestion[] }) => {
+				const questions = Array.isArray(args.questions) ? args.questions.slice(0, 1) : [];
+				return JSON.stringify({ ok: true, questions });
+			},
+		});
+	}
 	return tool({
 		description: DESCRIPTION,
 		inputSchema: z.object({
-			questions: z
-				.array(
-					z.object({
-						question: z.string().describe('The clarifying question to ask the user.'),
-						options: z
-							.array(z.string())
-							.optional()
-							.describe('Predefined answer options the user can choose from.'),
-						allow_multiple: z
-							.boolean()
-							.optional()
-							.describe('When true, the user may select more than one predefined option.'),
-						allow_custom: z
-							.boolean()
-							.optional()
-							.describe('When true, the user may enter a free-text answer not in options.'),
-					}),
-				)
-				.describe('One or more clarifying questions to present to the user.'),
+			questions: z.array(question).describe('One or more clarifying questions to present to the user.'),
 		}),
 		execute: async (args: { questions: ClarifyingQuestion[] }) => {
 			const questions = Array.isArray(args.questions) ? args.questions : [];

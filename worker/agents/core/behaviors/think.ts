@@ -4,7 +4,6 @@ import type { UIMessage } from 'ai';
 import { ThinkState } from '../state';
 import { AgentInitArgs, DeploymentTarget } from '../types';
 import { BaseCodingBehavior } from './base';
-import { renderEmbedderPrompt, toStoredContext } from '../embedder-context';
 import { WebSocketMessageResponses } from '../../constants';
 import { ICodingAgent } from '../../services/interfaces/ICodingAgent';
 import { OperationOptions } from '../../operations/common';
@@ -23,7 +22,7 @@ import {
 	resolvePreviewHost,
 } from 'worker/utils/urls';
 import { isDev } from 'worker/utils/envs';
-import { signSpacePreviewToken } from 'worker/utils/spacePreviewToken';
+import { EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS, signSpacePreviewToken } from 'worker/utils/spacePreviewToken';
 import { AppService } from 'worker/database/services/AppService';
 import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
@@ -39,7 +38,8 @@ import { CloudflareAccountService } from '../../../services/cloudflare/Cloudflar
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
 import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usageChecker';
 import type { CloudflareDeploymentErrorCode, WebSocketMessageData, WebSocketMessageType } from '../../../api/websocketTypes';
-import { deliverEmbedderEvent, toEmbedderEvent, type EmbedderEvent } from '../embedder-events';
+import { deliverEmbedderEvent, forwardedEvent, isWebhookSecret, toQuestionEvent, type EmbedderEvent } from '../embedder-events';
+import { EMBEDDED_CLARIFY_STEPS, renderEmbedderPrompt, toStoredContext } from '../embedder-context';
 
 /**
  * Minimal stub shape for the `ThinkAgent` DO (see `worker/agents/think/ThinkAgent.ts`).
@@ -185,10 +185,17 @@ export class ThinkCodingBehavior
 	// ──────────────────────────────────────────────────────────────
 	// Embedder progress
 
+	/**
+	 * Set when the agent asked the embedder a question in the current build. The
+	 * build then ends waiting for the answer, which is not a finished build.
+	 */
+	private askedThisBuild = false;
+
 	/** Everything the UI is told also reaches an embedding platform's callback, translated. */
 	public override broadcast<T extends WebSocketMessageType>(msg: T, data?: WebSocketMessageData<T>): void {
 		super.broadcast(msg, data);
-		const event = toEmbedderEvent(msg, data as Record<string, unknown> | undefined);
+		if (msg === WebSocketMessageResponses.GENERATION_STARTED) this.askedThisBuild = false;
+		const event = forwardedEvent(msg, data as Record<string, unknown> | undefined, this.askedThisBuild);
 		if (event) this.notifyEmbedder(event);
 	}
 
@@ -197,6 +204,10 @@ export class ThinkCodingBehavior
 		const url = this.state.embedderContext?.callbackUrl;
 		const secret = this.env.EMBEDDER_WEBHOOK_SECRET;
 		if (!url || !secret) return;
+		if (!isWebhookSecret(secret)) {
+			this.logger.error('EMBEDDER_WEBHOOK_SECRET is not whsec_ followed by base64; the embedder hears nothing', { type: event.type });
+			return;
+		}
 		void deliverEmbedderEvent({ url, secret, delivery: { agentId: this.getAgentId(), at: Date.now(), event } }).then((ok) => {
 			if (!ok) this.logger.warn('Embedder callback was not accepted', { type: event.type });
 		});
@@ -399,6 +410,7 @@ export class ThinkCodingBehavior
 			},
 			systemPrompt: this.buildSystemPrompt(modelName, aiModelConfig.provider),
 			previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
+			oneQuestionAtATime: Boolean(this.state.embedderContext),
 		};
 
 		try {
@@ -432,12 +444,16 @@ export class ThinkCodingBehavior
 			'## Naming',
 			'If this project does not yet have a clear name (e.g. the request is a long or vague description rather than a concise product name), call the `set_title` tool once, early, with a short human-friendly title (Title Case, under ~60 characters). Skip it if a good title already exists; do not rename on every turn.',
 			'',
-			'## Clarify before building',
-			'If the request is underspecified or ambiguous (e.g. a one-line idea with no details on features, scope, data, or design), do NOT start writing files yet. Instead, on this turn:',
-			'1. Briefly state the assumptions you would make to proceed.',
-			'2. Call the `ask_questions` tool with all the concise, targeted clarifying questions you need answered. Each question can include predefined options and can allow multiple selections and/or a custom free-text answer.',
-			'3. End your turn after calling `ask_questions`. Do not write/edit files or deploy until the scope is clear or the user tells you to proceed with your assumptions.',
-			'If the request is already clear and specific, skip this and go straight to building.',
+			...(this.state.embedderContext
+				? EMBEDDED_CLARIFY_STEPS
+				: [
+						'## Clarify before building',
+						'If the request is underspecified or ambiguous (e.g. a one-line idea with no details on features, scope, data, or design), do NOT start writing files yet. Instead, on this turn:',
+						'1. Briefly state the assumptions you would make to proceed.',
+						'2. Call the `ask_questions` tool with all the concise, targeted clarifying questions you need answered. Each question can include predefined options and can allow multiple selections and/or a custom free-text answer.',
+						'3. End your turn after calling `ask_questions`. Do not write/edit files or deploy until the scope is clear or the user tells you to proceed with your assumptions.',
+						'If the request is already clear and specific, skip this and go straight to building.',
+					]),
 			'',
 			...(this.state.designDirection ? renderDesignSteps(this.state.designDirection) : DEFAULT_FRONTEND_STEPS),
 			'',
@@ -509,12 +525,12 @@ export class ThinkCodingBehavior
 		// visibility toggle (which bumps it) invalidates this token.
 		const previewVersion = previewVersionOverride ??
 			(await new AppService(this.env).getPreviewVersion(spaceName)) ?? 0;
-		const token = await signSpacePreviewToken(this.env, {
-			spaceName,
-			branch,
-			userId: this.state.metadata.userId,
-			previewVersion,
-		});
+		// An embedder keeps the link to show its owner later, so it outlives a session's half hour.
+		const token = await signSpacePreviewToken(
+			this.env,
+			{ spaceName, branch, userId: this.state.metadata.userId, previewVersion },
+			this.state.embedderContext ? EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS : undefined,
+		);
 		return `${previewBaseUrl}?t=${encodeURIComponent(token)}`;
 	}
 
@@ -760,6 +776,8 @@ export class ThinkCodingBehavior
 					await this.handleDeploySpaceOutput(output);
 				} else if (toolName === 'set_title') {
 					await this.handleSetTitleOutput(args, output);
+				} else if (toolName === 'ask_questions') {
+					this.handleAskQuestionsOutput(output);
 				} else if (isFileDeleteTool(toolName)) {
 					await this.maybeDeleteFile(toolName, args, seenWrittenFiles);
 				} else {
@@ -934,6 +952,18 @@ export class ThinkCodingBehavior
 				error: e instanceof Error ? e.message : String(e),
 			});
 		}
+	}
+
+	/**
+	 * The agent asked a question. An embedder with no WebSocket open hears it as
+	 * `question.asked`, and its answer arrives as the next message.
+	 */
+	private handleAskQuestionsOutput(output: unknown): void {
+		if (!this.state.embedderContext) return;
+		const event = toQuestionEvent(output);
+		if (!event) return;
+		this.askedThisBuild = true;
+		this.notifyEmbedder(event);
 	}
 
 	/**

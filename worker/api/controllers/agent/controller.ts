@@ -60,7 +60,7 @@ export class CodingAgentController extends BaseController {
     /**
      * Start the incremental code generation process
      */
-    static async startCodeGeneration(request: Request, env: Env, _: ExecutionContext, context: RouteContext): Promise<Response> {
+    static async startCodeGeneration(request: Request, env: Env, ctx: ExecutionContext, context: RouteContext): Promise<Response> {
         try {
             this.logger.info('Starting code generation process');
 
@@ -279,11 +279,12 @@ export class CodingAgentController extends BaseController {
                 : { ...baseInitArgs, templateInfo: { templateDetails: templateResult!.templateDetails, selection: templateResult!.selection } };
 
             const agentPromise = agentInstance.initialize(initArgs) as Promise<AgentState>;
-            void (async () => {
+            // An embedding platform hangs up once it has the agent id. waitUntil
+            // keeps this alive past that; the build itself is started by the agent.
+            ctx.waitUntil((async () => {
                 try {
                     await agentPromise;
                     this.logger.info(`Agent ${agentId} initialized successfully`);
-                    if (embedderContext?.autoStart) await agentInstance.startGeneration();
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
                     this.logger.error(`Agent ${agentId} initialization failed`, error);
@@ -292,7 +293,7 @@ export class CodingAgentController extends BaseController {
                     await writer.write("terminate").catch(() => undefined);
                     await writer.close().catch(() => undefined);
                 }
-            })();
+            })());
 
             this.logger.info(`Agent ${agentId} init launched successfully`);
             
@@ -482,7 +483,7 @@ export class CodingAgentController extends BaseController {
     static async publish(
         _request: Request,
         env: Env,
-        ctx: ExecutionContext,
+        _: ExecutionContext,
         context: RouteContext
     ): Promise<ControllerResponse<ApiResponse<AgentRequestAccepted>>> {
         try {
@@ -494,11 +495,7 @@ export class CodingAgentController extends BaseController {
             if (!(await agentInstance.isInitialized())) {
                 return CodingAgentController.createErrorResponse<AgentRequestAccepted>('Agent instance not found or not initialized', 404);
             }
-            ctx.waitUntil(
-                agentInstance.deployToCloudflare('platform').catch((error: unknown) => {
-                    this.logger.error(`Publishing agent ${agentId} failed`, error);
-                }),
-            );
+            await agentInstance.publishInBackground();
             return CodingAgentController.createSuccessResponse<AgentRequestAccepted>({ agentId, accepted: true });
         } catch (error) {
             this.logger.error('Error publishing the agent', error);

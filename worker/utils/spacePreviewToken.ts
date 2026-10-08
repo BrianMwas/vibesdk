@@ -2,6 +2,11 @@ import { JWTUtils } from './jwtUtils';
 
 const PREVIEW_PURPOSE = 'space_preview';
 export const SPACE_PREVIEW_TOKEN_TTL_SECONDS = 30 * 60;
+/**
+ * A preview link handed to an embedding platform, which shows it to its owner
+ * whenever they come back to look. A visibility change still revokes it.
+ */
+export const EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const SPACE_PREVIEW_COOKIE_NAME = '__space_preview';
 
 export interface SpacePreviewClaims {
@@ -19,9 +24,10 @@ export interface SpacePreviewClaims {
 export async function signSpacePreviewToken(
 	env: { JWT_SECRET: string },
 	claims: SpacePreviewClaims,
+	ttlSeconds: number = SPACE_PREVIEW_TOKEN_TTL_SECONDS,
 ): Promise<string> {
 	const jwt = JWTUtils.getInstance(env);
-	return jwt.signPayload({ ...claims, purpose: PREVIEW_PURPOSE }, SPACE_PREVIEW_TOKEN_TTL_SECONDS);
+	return jwt.signPayload({ ...claims, purpose: PREVIEW_PURPOSE }, ttlSeconds);
 }
 
 export async function verifySpacePreviewToken(
