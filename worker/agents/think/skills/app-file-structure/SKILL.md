@@ -249,7 +249,7 @@ Fix one of these three ways:
 
 1. **Pre-compile** — write JSX in a build step (Vite/esbuild/tsup) and emit plain JS into `public/`. Best for production.
 2. **`React.createElement` by hand** — works without a build step but is verbose.
-3. **`@babel/standalone`** — only for prototypes. Load Babel **before** the script and use `type="text/babel"`. The modern `@babel/preset-react` defaults to the **automatic JSX runtime**, which emits `import { jsx } from "react/jsx-runtime"`. Browsers will reject that bare specifier unless your importmap maps it. **Always ship a complete importmap alongside the Babel script:**
+3. **`@babel/standalone`** (the standard for this platform — `scaffold_ui_kit` writes this shell for you). Two facts are easy to get wrong: `@babel/standalone@7` compiles JSX with the **classic** runtime by default (so `<div>` becomes `React.createElement` and fails with `React is not defined` unless React is imported), and `data-presets` only takes comma-separated preset *names*, not JSON options. The reliable setup registers a named automatic-runtime preset before Babel runs and maps every React specifier in the importmap:
 
    ```html
    <script type="importmap">
@@ -262,32 +262,21 @@ Fix one of these three ways:
      }
    }
    </script>
-   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-   <script type="text/babel" data-type="module" data-presets="react">
-     import React from "react";
-     import { createRoot } from "react-dom/client";
-     const App = () => <div>hi</div>;
-     createRoot(document.getElementById("root")).render(<App />);
-   </script>
+   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+   <script>Babel.registerPreset("react-auto", { presets: [[Babel.availablePresets.react, { runtime: "automatic" }]] });</script>
+   ...
+   <div id="root"></div>
+   <script type="text/babel" data-type="module" data-presets="react-auto" src="/app.jsx"></script>
    ```
 
-   `data-type="module"` is required for `import` to work inside the Babel script. Import React from the importmap key (`"react"`) — not from a hard-coded `esm.sh` URL — so your code and Babel's emitted `react/jsx-runtime` import resolve to the **same** React instance.
-
-   If you really cannot ship `react/jsx-runtime` in the importmap, force Babel to the legacy classic runtime instead so it emits `React.createElement` calls and never touches `react/jsx-runtime`:
-
-   ```html
-   <script
-     type="text/babel"
-     data-type="module"
-     data-presets="react"
-     data-plugins='[["transform-react-jsx", { "runtime": "classic" }]]'
-   >
-     import React from "https://esm.sh/react@18.3.1";  /* must be in scope */
-     const App = () => <div>hi</div>;
-   </script>
+   ```jsx
+   // public/app.jsx — no React import needed with the automatic runtime
+   import { createRoot } from "react-dom/client";
+   const App = () => <div>hi</div>;
+   createRoot(document.getElementById("root")).render(<App />);
    ```
 
-   The classic runtime requires `React` to be in lexical scope (because `<div>` becomes `React.createElement("div")`). The automatic runtime (default) does not, but needs `react/jsx-runtime` resolvable.
+   `data-type="module"` is required for `import` to work. Only the file named in the `text/babel` tag is compiled: a `.jsx` file it imports is loaded raw and fails to parse, so keep all JSX in that one file. The console warning "You are using the in-browser Babel transformer" is expected here.
 
 ### Symptom-to-fix index
 
@@ -295,6 +284,7 @@ Fix one of these three ways:
 | --- | --- | --- |
 | `Uncaught SyntaxError: Unexpected token '<'` (inside `<script type="module">`) | JSX shipped raw to the browser | Pre-compile, or use `@babel/standalone` with `type="text/babel"` |
 | `Uncaught TypeError: Failed to resolve module specifier "react/jsx-runtime". Relative references must start with either "/", "./", or "../".` | Automatic JSX runtime emits `import "react/jsx-runtime"` but importmap doesn't map it | Add `"react/jsx-runtime": "https://esm.sh/react@<same-version>/jsx-runtime"` to the importmap **before** the Babel/script tag — or force the classic runtime (see above) |
+| `ReferenceError: React is not defined` | Babel's default classic JSX runtime with no `React` import | Use the registered `react-auto` preset shown above (or `import React from "react"` in the file) |
 | `Uncaught TypeError: Failed to resolve module specifier "react"` (or any bare name) | No importmap entry for that package | Add it to the importmap; importmap script tag must appear **before** any module script that uses the specifier |
 | `TypeError: Cannot read properties of null (reading 'useContext')` | Dual-React (two copies loaded) | Append `?external=react,react-dom` to every esm.sh URL with React as a peer dep — see the dual-React trap below |
 
@@ -365,6 +355,21 @@ The bundler installs deps from npm at build time. Limits to respect:
 - **`cloudflare:*` imports are always external** and resolved by the runtime (`cloudflare:workers`, etc.). Don't add them to `package.json`.
 
 Safe and well-tested deps: `hono`, `zod`, `itty-router`, `nanoid`, `valibot`, `@hono/zod-validator`. Avoid anything that needs node-native modules unless you set `compatibility_flags: ["nodejs_compat"]` and the package is pure JS under that flag.
+
+## Using the shadcn/ui component kit
+
+Any site or app with a UI starts with `scaffold_ui_kit`, then `get_ui_blocks`.
+
+`scaffold_ui_kit` vendors a precompiled shadcn/ui kit (Radix UI primitives, MIT licensed) into `public/vendor/ui-kit.js` and `public/vendor/ui-kit.css` and — only where they don't exist yet — writes a verified `public/index.html` shell (React import map with `lucide-react`, Tailwind runtime, automatic-runtime Babel, loads `/app.jsx`), an empty `public/styles.css`, and a static-assets `wrangler.json`. Its `theme`, `radius` and `mode` arguments set `data-theme`, `data-radius` and the `dark` class on `<html>`; calling it again with new values restyles an existing page.
+
+`get_ui_blocks` returns ready-made sections — marketing (header, heroes, feature grid, testimonials, pricing, FAQ, CTA band, contact, footer), app (sidebar shells, app header, KPI stats, page with tabs, data table, record sheet, form and confirm dialogs, settings) and auth (login) — as one snippet with merged imports. Build pages from them and replace their placeholder content.
+
+- **All JSX lives in `public/app.jsx`.** Import kit components with a relative path: `import { Button, Sheet, Container } from "./vendor/ui-kit.js"`. A root-relative `/vendor/...` inside JS is not rewritten and breaks in the preview. Icons come from `lucide-react`.
+- **Structure from layout primitives.** `Section` (vertical rhythm, `tone="muted"` for alternating bands) holds a `Container` (max width + gutters), which holds `Stack`, `Grid` (responsive columns) and `Inline`. `SectionHeader` titles marketing sections; `PageHeader`, `StatCard` and `EmptyState` structure app screens. Don't hand-pick padding, gaps or max widths.
+- **Tailwind works, through the tokens.** The shell runs Tailwind with the kit's theme, so any utility class compiles. Colors use the token classes (`bg-background`, `bg-muted`, `text-muted-foreground`, `bg-primary`, `border`, `bg-card`) so themes and dark mode apply; never hex values like `bg-[#2E5A44]`. Corners use `rounded-sm` … `rounded-3xl`, which all scale from the `data-radius` preset (`sharp` makes everything square).
+- **Custom palette.** To go beyond the presets, set the tokens under `:root` in `public/styles.css` (they win over the preset). Values are bare HSL components — `--primary: 213 52% 24%;` — never hex or `hsl(...)`; a hex value silently renders transparent.
+- **Tailwind's reset is active.** Headings render at body size and lists have no markers; size headings with utilities (`text-4xl font-semibold tracking-tight`).
+- Don't hand-edit `ui-kit.js`; it's compiled output. Component variants (`variant="outline"`, `size="lg"`, etc.) work as in shadcn.
 
 ## Project shapes
 

@@ -17,6 +17,9 @@ import { selectSystemPrompt, PROMPT_MAX_STEPS } from './prompts';
 import { createThinkSkillSource } from './skills';
 import { createAskQuestionsTool } from './ask-questions-tool';
 import { createBrowserConsoleLogsTool } from './browser-logs-tool';
+import { createSearchImagesTool } from './search-images-tool';
+import { createScaffoldUiKitTool } from './scaffold-ui-kit-tool';
+import { createGetUiBlocksTool } from './get-ui-blocks-tool';
 import { createDeploySpaceTool } from './deploy-tool';
 import { createCommitTool } from './commit-tool';
 import { createSetTitleTool } from './set-title-tool';
@@ -25,7 +28,14 @@ import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
 import type { RateLimitSettings } from '../../services/rate-limit/config';
-import { THINK_MODEL_CONFIG } from './model-config';
+import { resolveThinkModel } from './model-config';
+import {
+	ReasoningReplay,
+	collectReasoning,
+	emptyStreamedResponse,
+	needsReasoningReplay,
+	type StreamedResponse,
+} from './reasoning-replay';
 
 /**
  * Per-instance configuration pushed into a {@link ThinkAgent} by the host
@@ -64,6 +74,11 @@ export interface ThinkAgentConfig {
 	 * as the default target for the `get_browser_console_logs` tool.
 	 */
 	previewUrl?: string;
+	/**
+	 * Set for a session an embedding platform started: `ask_questions` takes one
+	 * question with two to four suggested answers, which the platform can relay.
+	 */
+	oneQuestionAtATime?: boolean;
 }
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -118,10 +133,12 @@ function patchToolCallChunk(
 function fixToolCallStream(
 	body: ReadableStream<Uint8Array>,
 	onSignature: (id: string, signature: string) => void,
+	onResponse?: (response: StreamedResponse) => void,
 ): ReadableStream<Uint8Array> {
 	const decoder = new TextDecoder();
 	const encoder = new TextEncoder();
 	let buffer = '';
+	const response = emptyStreamedResponse();
 	const transformLine = (line: string): string => {
 		const trimmed = line.trimStart();
 		if (!trimmed.startsWith('data:')) return line;
@@ -129,6 +146,7 @@ function fixToolCallStream(
 		if (!payload || payload === '[DONE]') return line;
 		try {
 			const json = JSON.parse(payload) as Record<string, unknown>;
+			if (onResponse && Array.isArray(json.choices)) collectReasoning(json.choices, response);
 			return `data: ${JSON.stringify(patchToolCallChunk(json, onSignature))}`;
 		} catch {
 			return line;
@@ -146,6 +164,7 @@ function fixToolCallStream(
 			},
 			flush(controller) {
 				if (buffer) controller.enqueue(encoder.encode(transformLine(buffer)));
+				onResponse?.(response);
 			},
 		}),
 	);
@@ -169,6 +188,8 @@ export class ThinkAgent extends Think<Env> {
 	 * the `extra_content` Google requires for multi-step function calling).
 	 */
 	private readonly thoughtSignatures = new Map<string, string>();
+	/** Kimi `reasoning_content` harvested from streamed responses (see `reasoning-replay.ts`). */
+	private readonly reasoningReplay = new ReasoningReplay();
 	private turnUsage: { config: RateLimitSettings; hasCloudflareConfigured: boolean } | null = null;
 
 	/**
@@ -207,6 +228,18 @@ export class ThinkAgent extends Think<Env> {
 		return changed ? JSON.stringify(json) : bodyText;
 	}
 
+	/** Re-attach harvested `reasoning_content` to outgoing assistant tool-call messages. */
+	private injectReasoning(bodyText: string): string {
+		let json: { messages?: unknown };
+		try {
+			json = JSON.parse(bodyText);
+		} catch {
+			return bodyText;
+		}
+		if (!Array.isArray(json.messages)) return bodyText;
+		return this.reasoningReplay.attach(json.messages) ? JSON.stringify(json) : bodyText;
+	}
+
 	private requireConfig(): ThinkAgentConfig {
 		const cfg = this.getConfig<ThinkAgentConfig>();
 		if (!cfg) {
@@ -224,6 +257,7 @@ export class ThinkAgent extends Think<Env> {
 
 	override getModel(): LanguageModel {
 		const { model } = this.requireConfig();
+		const replayReasoning = needsReasoningReplay(model.modelName);
 		// Wrap fetch to (1) strip the provider `Authorization` header in BYOK /
 		// stored-keys mode (the gateway injects the stored key; a forwarded
 		// header would override it) while preserving `cf-aig-authorization`;
@@ -231,12 +265,16 @@ export class ThinkAgent extends Think<Env> {
 		// (which omit `index`) satisfy the OpenAI provider's chunk schema; and
 		// (3) round-trip Gemini `thought_signature`s — harvest them from the
 		// response and re-inject them into outgoing request history (the AI SDK
-		// drops them, which Gemini 3 rejects with `400 INVALID_ARGUMENT`).
+		// drops them, which Gemini 3 rejects with `400 INVALID_ARGUMENT`); and
+		// (4) for Kimi, round-trip `reasoning_content` the same way.
 		const gatewayFetch: typeof fetch = async (input, init) => {
 			const headers = new Headers(init?.headers);
 			if (model.useStoredKeys) headers.delete('authorization');
 			let body = init?.body;
-			if (typeof body === 'string') body = this.injectThoughtSignatures(body);
+			if (typeof body === 'string') {
+				body = this.injectThoughtSignatures(body);
+				if (replayReasoning) body = this.injectReasoning(body);
+			}
 			const res = await fetch(input as RequestInfo, { ...(init ?? {}), headers, body });
 			if (!res.body) return res;
 			const outHeaders = new Headers(res.headers);
@@ -244,7 +282,11 @@ export class ThinkAgent extends Think<Env> {
 			outHeaders.delete('content-length');
 			outHeaders.delete('content-encoding');
 			return new Response(
-				fixToolCallStream(res.body, (id, sig) => this.thoughtSignatures.set(id, sig)),
+				fixToolCallStream(
+					res.body,
+					(id, sig) => this.thoughtSignatures.set(id, sig),
+					replayReasoning ? (response) => this.reasoningReplay.record(response) : undefined,
+				),
 				{ status: res.status, statusText: res.statusText, headers: outHeaders },
 			);
 		};
@@ -321,7 +363,8 @@ export class ThinkAgent extends Think<Env> {
 
 	override getTools(): ToolSet {
 		const ops = createSpaceWorkspaceOps(() => this.getSpaceStub());
-		const previewUrl = this.getConfig<ThinkAgentConfig>()?.previewUrl;
+		const config = this.getConfig<ThinkAgentConfig>();
+		const previewUrl = config?.previewUrl;
 		// Same names as Think's built-in workspace tools, so these SpaceDO-backed
 		// versions win the tool-merge. Bash is disabled via `workspaceBash`.
 		return {
@@ -339,12 +382,18 @@ export class ThinkAgent extends Think<Env> {
 			// Set the project's short display title (host observes the output).
 			set_title: createSetTitleTool(),
 			// Ask the user clarifying questions via a frontend popup.
-			ask_questions: createAskQuestionsTool(),
+			ask_questions: createAskQuestionsTool({ oneAtATime: config?.oneQuestionAtATime === true }),
 			// Client-side debugging via a real headless browser.
 			get_browser_console_logs: createBrowserConsoleLogsTool({
 				env: this.env,
 				defaultUrl: previewUrl,
 			}),
+			// Real, licensed stock photos for heroes/sections that call for a photo.
+			search_images: createSearchImagesTool({ env: this.env }),
+			// Vendors the precompiled shadcn/ui kit and the React page shell.
+			scaffold_ui_kit: createScaffoldUiKitTool({ ops }),
+			// Ready-made page sections built on the kit's layout primitives.
+			get_ui_blocks: createGetUiBlocksTool(),
 		} as unknown as ToolSet;
 	}
 
@@ -370,7 +419,10 @@ export class ThinkAgent extends Think<Env> {
 				'',
 				false,
 				this.turnUsage.hasCloudflareConfigured,
-				{ creditCost: THINK_MODEL_CONFIG.creditCost, throwOnExceeded: false },
+				{
+					creditCost: resolveThinkModel({ THINK_MODEL_ID: config.model.modelName }).config.creditCost,
+					throwOnExceeded: false,
+				},
 			);
 		}
 		if (ctx.stepNumber >= this.maxSteps - 1) {

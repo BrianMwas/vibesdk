@@ -5,6 +5,7 @@ import type { PhasicBlueprint, AgenticBlueprint, PhaseConceptType ,
 import type { InferenceMetadata } from '../inferutils/config.types';
 import { BehaviorType, Plan, ProjectType } from './types';
 import type { StoredEmbedderContext } from './embedder-context';
+import type { DesignDirection } from '../think/design/direction';
 
 export interface FileState extends FileOutputType {
     lastDiff: string;
@@ -139,6 +140,8 @@ export interface ThinkState extends BaseProjectState {
     cloudflareDeploymentUrl?: string;
     /** What the embedding platform asked for; the seed files are not kept. */
     embedderContext?: StoredEmbedderContext;
+    /** The look (and, for a website, the sections) decided before the first turn. */
+    designDirection?: DesignDirection;
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;

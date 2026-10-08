@@ -21,6 +21,12 @@ export interface CodeGenArgs {
     credentials?: CredentialsPayload;
 }
 
+/** A request from an embedding platform was taken; what follows reaches its callback. */
+export interface AgentRequestAccepted {
+    agentId: string;
+    accepted: true;
+}
+
 /**
  * Data structure for connectToExistingAgent response
  */

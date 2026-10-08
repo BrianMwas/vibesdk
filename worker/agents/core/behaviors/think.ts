@@ -4,7 +4,6 @@ import type { UIMessage } from 'ai';
 import { ThinkState } from '../state';
 import { AgentInitArgs, DeploymentTarget } from '../types';
 import { BaseCodingBehavior } from './base';
-import { renderEmbedderPrompt, toStoredContext } from '../embedder-context';
 import { WebSocketMessageResponses } from '../../constants';
 import { ICodingAgent } from '../../services/interfaces/ICodingAgent';
 import { OperationOptions } from '../../operations/common';
@@ -23,17 +22,24 @@ import {
 	resolvePreviewHost,
 } from 'worker/utils/urls';
 import { isDev } from 'worker/utils/envs';
-import { signSpacePreviewToken } from 'worker/utils/spacePreviewToken';
+import { EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS, signSpacePreviewToken } from 'worker/utils/spacePreviewToken';
 import { AppService } from 'worker/database/services/AppService';
 import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
-import { THINK_MODEL_CONFIG, THINK_MODEL_ID } from '../../think/model-config';
+import { resolveThinkModel } from '../../think/model-config';
+import { chooseDesign, type DesignCompletion } from '../../think/design/choose';
+import { DESIGN_FILE_PATH, parseDesignInput, type DesignDirection } from '../../think/design/direction';
+import { designSeedFiles, renderDesignSteps } from '../../think/design/render';
+import { executeInference } from '../../inferutils/infer';
+import { createSystemMessage, createUserMessage } from '../../inferutils/common';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
 import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usageChecker';
-import type { CloudflareDeploymentErrorCode } from '../../../api/websocketTypes';
+import type { CloudflareDeploymentErrorCode, WebSocketMessageData, WebSocketMessageType } from '../../../api/websocketTypes';
+import { deliverEmbedderEvent, forwardedEvent, isWebhookSecret, toQuestionEvent, type EmbedderEvent } from '../embedder-events';
+import { EMBEDDED_CLARIFY_STEPS, renderEmbedderPrompt, toStoredContext } from '../embedder-context';
 
 /**
  * Minimal stub shape for the `ThinkAgent` DO (see `worker/agents/think/ThinkAgent.ts`).
@@ -98,6 +104,32 @@ class ThinkStreamForwarder extends RpcTarget {
 	onInterrupted(): void {}
 }
 
+/** The frontend steps when no design was decided (the builder chooses the look). */
+const DEFAULT_FRONTEND_STEPS: readonly string[] = [
+	'## Frontend standard (required for anything with a UI)',
+	'The skill catalog is not optional reading. In the first building turn, before writing any frontend file:',
+	'1. Call `activate_skill` for `frontend-design`, `cloudflare-bundler-apps`, `design-archetypes` and `no-ai-design-slop`. Also activate `frontend-design-landing-page` for a marketing, business or landing site, or `frontend-design-saas` for a dashboard or app UI. Their rules override your defaults.',
+	'2. Write the short design plan `frontend-design` asks for (palette as named hex values, typefaces, layout) and check it against the brief before coding.',
+	'3. Call `scaffold_ui_kit` with the site name as `title` and a `theme`, `radius` (sharp, small, default, large, round) and `mode` that fit the plan. If the plan needs its own palette, set the tokens in `public/styles.css` (they override the preset) — never ship the neutral defaults.',
+	'4. Call `get_ui_blocks` once with every section the page needs, in order — e.g. marketing-header, hero-split, feature-grid, pricing, faq, contact, site-footer for a business site; sidebar-07, app-header, dashboard-stats, page-with-tabs, data-table, record-sheet for an app — and build `public/app.jsx` from the returned code. Replace all placeholder content with the real content. Keep the structure: layout comes from `Section`, `Container`, `Stack`, `Grid`, `Inline`, `SectionHeader` and `PageHeader`, not hand-picked padding or widths; menus, dialogs, sheets, tabs and form controls come from the kit, not divs; colors use token classes (`bg-primary`, `text-muted-foreground`), never hex; icons come from `lucide-react`, never emoji. Put top-level app areas in the sidebar, and use tabs only for a few sub-views of one area.',
+	'5. Keep the first screen uncluttered: one headline, one supporting sentence, at most two actions. Hours, address, phone numbers, badges and trust points belong further down or in the footer, not stacked above the fold.',
+	'6. Before the final `deploy_space` of a building turn, activate `audit-ai-design-slop`, list each issue it finds in what you built, and fix them before deploying.',
+	'On later turns, skills you already activated in this conversation stay in effect; activate any you have not used yet when the task calls for them.',
+];
+
+/** How much of the embedder's instructions the design choice reads. */
+const DESIGN_BRIEF_INSTRUCTION_CHARS = 6_000;
+
+/** The embedder's seed files plus the design files; an embedder's own `public/styles.css` wins. */
+function withDesignFiles(
+	seedFiles: Record<string, string> | undefined,
+	direction: DesignDirection | undefined,
+): Record<string, string> | undefined {
+	if (!direction) return seedFiles;
+	const design = designSeedFiles(direction);
+	return { ...design, ...seedFiles, [DESIGN_FILE_PATH]: design[DESIGN_FILE_PATH] };
+}
+
 /**
  * ThinkCodingBehavior — agentic coding harness built on `@cloudflare/think`.
  *
@@ -151,6 +183,37 @@ export class ThinkCodingBehavior
 	}
 
 	// ──────────────────────────────────────────────────────────────
+	// Embedder progress
+
+	/**
+	 * Set when the agent asked the embedder a question in the current build. The
+	 * build then ends waiting for the answer, which is not a finished build.
+	 */
+	private askedThisBuild = false;
+
+	/** Everything the UI is told also reaches an embedding platform's callback, translated. */
+	public override broadcast<T extends WebSocketMessageType>(msg: T, data?: WebSocketMessageData<T>): void {
+		super.broadcast(msg, data);
+		if (msg === WebSocketMessageResponses.GENERATION_STARTED) this.askedThisBuild = false;
+		const event = forwardedEvent(msg, data as Record<string, unknown> | undefined, this.askedThisBuild);
+		if (event) this.notifyEmbedder(event);
+	}
+
+	/** Posts to the embedder's callback, if it gave one. Fire and forget: delivery never blocks the build. */
+	private notifyEmbedder(event: EmbedderEvent): void {
+		const url = this.state.embedderContext?.callbackUrl;
+		const secret = this.env.EMBEDDER_WEBHOOK_SECRET;
+		if (!url || !secret) return;
+		if (!isWebhookSecret(secret)) {
+			this.logger.error('EMBEDDER_WEBHOOK_SECRET is not whsec_ followed by base64; the embedder hears nothing', { type: event.type });
+			return;
+		}
+		void deliverEmbedderEvent({ url, secret, delivery: { agentId: this.getAgentId(), at: Date.now(), event } }).then((ok) => {
+			if (!ok) this.logger.warn('Embedder callback was not accepted', { type: event.type });
+		});
+	}
+
+	// ──────────────────────────────────────────────────────────────
 	// Initialize
 
 	async initialize(
@@ -197,19 +260,86 @@ export class ThinkCodingBehavior
 			embedderContext: embedderContext ? toStoredContext(embedderContext) : undefined,
 		});
 
+		const designStartedAt = performance.now();
+		const designDirection = await this.decideDesign(query, embedderContext?.seedFiles, embedderContext?.instructions);
+		if (designDirection) {
+			this.setState({ ...this.state, designDirection });
+			this.notifyEmbedder({
+				type: 'design.chosen',
+				kind: designDirection.kind,
+				palette: designDirection.palette.name,
+				fonts: `${designDirection.fonts.heading.family} and ${designDirection.fonts.body.family}`,
+				sections: designDirection.sections ?? [],
+			});
+		}
+		const designDurationMs = performance.now() - designStartedAt;
+
 		const configureStartedAt = performance.now();
 		await this.configureThinkAgent();
 		const configureDurationMs = performance.now() - configureStartedAt;
 
 		const seedStartedAt = performance.now();
-		await this.seedEmptySpace(embedderContext?.seedFiles);
+		await this.seedEmptySpace(withDesignFiles(embedderContext?.seedFiles, designDirection));
 		const seedDurationMs = performance.now() - seedStartedAt;
 
 		this.logger.info(
 			`Think agent ${this.getAgentId()} initialized (space=${agentName})`,
-			{ configureDurationMs, seedDurationMs },
+			{
+				designDurationMs,
+				configureDurationMs,
+				seedDurationMs,
+				design: designDirection
+					? {
+							source: designDirection.source,
+							kind: designDirection.kind,
+							palette: designDirection.palette.id,
+							fonts: designDirection.fonts.id,
+							radius: designDirection.radius,
+							sections: designDirection.sections,
+						}
+					: null,
+			},
 		);
 		return this.state;
+	}
+
+	/**
+	 * The design the build starts from: the embedder's `design.json` when it
+	 * supplies a valid one, otherwise one chosen for the brief by a fast model
+	 * (the `templateSelection` model) from this app's shortlist. Undefined when
+	 * the request has no conventional UI.
+	 */
+	private async decideDesign(
+		query: string,
+		seedFiles: Record<string, string> | undefined,
+		instructions: string | undefined,
+	): Promise<DesignDirection | undefined> {
+		const supplied = seedFiles?.[DESIGN_FILE_PATH];
+		if (supplied !== undefined) {
+			const parsed = parseDesignInput(supplied);
+			if (parsed.ok) return parsed.direction;
+			this.logger.warn('Ignoring the embedder design.json; choosing a design instead', { error: parsed.error });
+		}
+		const brief = instructions ? `${query}\n\n${instructions.slice(0, DESIGN_BRIEF_INSTRUCTION_CHARS)}` : query;
+		const complete: DesignCompletion = async (prompt, schema) => {
+			const { object } = await executeInference({
+				env: this.env,
+				messages: [createSystemMessage(prompt.system), createUserMessage(prompt.user)],
+				agentActionName: 'templateSelection',
+				schema,
+				context: this.getInferenceContext(),
+				maxTokens: 1500,
+				retryLimit: 1,
+			});
+			return object;
+		};
+		const result = await chooseDesign({
+			brief,
+			seed: this.getAgentId(),
+			complete,
+			onError: (error) => this.logger.warn('Design choice failed; using the fallback look', error),
+		});
+		return result.kind === 'direction' ? result.direction : undefined;
 	}
 
 	/**
@@ -220,8 +350,7 @@ export class ThinkCodingBehavior
 		const inf = this.getInferenceContext();
 		const userId = this.state.metadata.userId;
 
-		const modelName = THINK_MODEL_ID;
-		const aiModelConfig = THINK_MODEL_CONFIG;
+		const { id: modelName, config: aiModelConfig } = resolveThinkModel(this.env);
 
 		let conf: { baseURL: string; apiKey: string; defaultHeaders?: Record<string, string> };
 		try {
@@ -281,6 +410,7 @@ export class ThinkCodingBehavior
 			},
 			systemPrompt: this.buildSystemPrompt(modelName, aiModelConfig.provider),
 			previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
+			oneQuestionAtATime: Boolean(this.state.embedderContext),
 		};
 
 		try {
@@ -314,12 +444,18 @@ export class ThinkCodingBehavior
 			'## Naming',
 			'If this project does not yet have a clear name (e.g. the request is a long or vague description rather than a concise product name), call the `set_title` tool once, early, with a short human-friendly title (Title Case, under ~60 characters). Skip it if a good title already exists; do not rename on every turn.',
 			'',
-			'## Clarify before building',
-			'If the request is underspecified or ambiguous (e.g. a one-line idea with no details on features, scope, data, or design), do NOT start writing files yet. Instead, on this turn:',
-			'1. Briefly state the assumptions you would make to proceed.',
-			'2. Call the `ask_questions` tool with all the concise, targeted clarifying questions you need answered. Each question can include predefined options and can allow multiple selections and/or a custom free-text answer.',
-			'3. End your turn after calling `ask_questions`. Do not write/edit files or deploy until the scope is clear or the user tells you to proceed with your assumptions.',
-			'If the request is already clear and specific, skip this and go straight to building.',
+			...(this.state.embedderContext
+				? EMBEDDED_CLARIFY_STEPS
+				: [
+						'## Clarify before building',
+						'If the request is underspecified or ambiguous (e.g. a one-line idea with no details on features, scope, data, or design), do NOT start writing files yet. Instead, on this turn:',
+						'1. Briefly state the assumptions you would make to proceed.',
+						'2. Call the `ask_questions` tool with all the concise, targeted clarifying questions you need answered. Each question can include predefined options and can allow multiple selections and/or a custom free-text answer.',
+						'3. End your turn after calling `ask_questions`. Do not write/edit files or deploy until the scope is clear or the user tells you to proceed with your assumptions.',
+						'If the request is already clear and specific, skip this and go straight to building.',
+					]),
+			'',
+			...(this.state.designDirection ? renderDesignSteps(this.state.designDirection) : DEFAULT_FRONTEND_STEPS),
 			'',
 			'## Deploy & verify workflow (VibeSDK-specific)',
 			'Once you are actively building (the scope is clear or the user confirmed), this app is previewed on Cloudflare Workers via SpaceDO — there is no shell. In a building turn, do NOT end after only writing files:',
@@ -389,12 +525,12 @@ export class ThinkCodingBehavior
 		// visibility toggle (which bumps it) invalidates this token.
 		const previewVersion = previewVersionOverride ??
 			(await new AppService(this.env).getPreviewVersion(spaceName)) ?? 0;
-		const token = await signSpacePreviewToken(this.env, {
-			spaceName,
-			branch,
-			userId: this.state.metadata.userId,
-			previewVersion,
-		});
+		// An embedder keeps the link to show its owner later, so it outlives a session's half hour.
+		const token = await signSpacePreviewToken(
+			this.env,
+			{ spaceName, branch, userId: this.state.metadata.userId, previewVersion },
+			this.state.embedderContext ? EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS : undefined,
+		);
 		return `${previewBaseUrl}?t=${encodeURIComponent(token)}`;
 	}
 
@@ -640,6 +776,8 @@ export class ThinkCodingBehavior
 					await this.handleDeploySpaceOutput(output);
 				} else if (toolName === 'set_title') {
 					await this.handleSetTitleOutput(args, output);
+				} else if (toolName === 'ask_questions') {
+					this.handleAskQuestionsOutput(output);
 				} else if (isFileDeleteTool(toolName)) {
 					await this.maybeDeleteFile(toolName, args, seenWrittenFiles);
 				} else {
@@ -817,6 +955,18 @@ export class ThinkCodingBehavior
 	}
 
 	/**
+	 * The agent asked a question. An embedder with no WebSocket open hears it as
+	 * `question.asked`, and its answer arrives as the next message.
+	 */
+	private handleAskQuestionsOutput(output: unknown): void {
+		if (!this.state.embedderContext) return;
+		const event = toQuestionEvent(output);
+		if (!event) return;
+		this.askedThisBuild = true;
+		this.notifyEmbedder(event);
+	}
+
+	/**
 	 * The model named the project via the `set_title` tool. Pull the chosen
 	 * title from the tool output (falling back to its input), then persist it to
 	 * the app state + database via {@link setTitle}.
@@ -913,7 +1063,9 @@ export class ThinkCodingBehavior
 	): Promise<{ deploymentUrl?: string; workersUrl?: string } | null> {
 		const userAccountDeployEnabled = this.env.ENABLE_USER_ACCOUNT_DEPLOY === 'true';
 
-		if (!userAccountDeployEnabled) {
+		// An embedding platform routes its own hostnames into the platform's
+		// dispatch namespace, so its sites always publish there.
+		if (!userAccountDeployEnabled || this.state.embedderContext) {
 			return this.deployThinkAppToPlatform();
 		}
 

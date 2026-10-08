@@ -24,11 +24,13 @@ declare namespace Cloudflare {
 		GITHUB_CLIENT_ID: string;
 		GITHUB_CLIENT_SECRET: string;
 		OPENROUTER_API_KEY: string;
+		PEXELS_API_KEY: string;
 		PLATFORM_MODEL_PROVIDERS: string;
 		SANDBOX_SERVICE_API_KEY: string;
 		SANDBOX_SERVICE_TYPE: string;
 		SANDBOX_SERVICE_URL: string;
 		SENTRY_DSN: string;
 		SERPAPI_KEY: string;
+		THINK_MODEL_ID?: string;
 	}
 }

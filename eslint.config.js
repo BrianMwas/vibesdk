@@ -12,6 +12,8 @@ export default tseslint.config(
 			'wrangler-configuration.d.ts',
 			'test-diff-formatters/**',
 			'cf-git/**',
+			// Minified CSS kept under a .js name so it can be imported ?raw; not JavaScript.
+			'worker/agents/think/ui-kit/ui-kit.css.js',
 			'**/*.test.ts',
 			'**/*.test.tsx',
 			'**/*.spec.ts',
