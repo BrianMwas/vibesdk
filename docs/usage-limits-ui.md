@@ -142,4 +142,6 @@ Think deploy targets are gated by the worker flag `ENABLE_USER_ACCOUNT_DEPLOY` (
 | Optionally exempt all connected users from limits | `llmConfig.excludeCloudflareConnected` (default: `false`) |
 | Free tier uses calendar-daily window (UTC midnight reset) | `llmConfig.calendarDaily` |
 | App-creation limits are independent of LLM limits | Separate `appCreation` config; not touched by connected/BYOK bypass |
+| Embedding platforms have their own app-creation ceiling | Accounts in `EMBEDDER_USER_IDS` answer to `embedderAppCreation` (1000 a day, 400 a minute) instead of `appCreation` (3 a day), since one such account creates every one of the platform's customers' apps and the platform holds each customer to its own plan |
+| Embedding platforms share one LLM bucket | An embedder's builds and its deployed apps' AI proxy calls count against that one account's `llmCalls`; Think steps only meter, but the design choice falls back to the default look once the bucket is spent. Raise it with a `user_config:<embedder id>` override in KV rather than in the defaults |
 | Limits feature disabled entirely | `ENABLE_CLOUDFLARE_LIMITS != 'true'` → `checkUsageAndBalance` returns `limit: Infinity` immediately |

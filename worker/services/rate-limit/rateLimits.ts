@@ -8,6 +8,7 @@ import { RateLimitResult } from './DORateLimitStore';
 import { RateLimitExceededError, SecurityError } from 'shared/types/errors';
 import { isDev } from 'worker/utils/envs';
 import { AI_MODEL_CONFIG, AIModels } from 'worker/agents/inferutils/config.types';
+import { isEmbedderAccount } from 'worker/agents/core/embedder-context';
 
 interface LLMCallRateLimitOptions {
 	creditCost?: number;
@@ -275,21 +276,32 @@ export class RateLimitService {
         }
     }
 
+	/**
+	 * Which app-creation limit an account answers to: an embedding platform's
+	 * own ceiling, or the per-account limit everyone else has.
+	 */
+	static appCreationLimitFor(env: Pick<Env, 'EMBEDDER_USER_IDS'>, user: AuthUser): RateLimitType.APP_CREATION | RateLimitType.EMBEDDER_APP_CREATION {
+		return isEmbedderAccount(user.id, env.EMBEDDER_USER_IDS)
+			? RateLimitType.EMBEDDER_APP_CREATION
+			: RateLimitType.APP_CREATION;
+	}
+
 	static async enforceAppCreationRateLimit(
 		env: Env,
 		config: RateLimitSettings,
 		user: AuthUser,
 		request: Request
 	): Promise<void> {
-		if (!config[RateLimitType.APP_CREATION].enabled) {
+		const limitType = this.appCreationLimitFor(env, user);
+		if (!config[limitType].enabled) {
 			return;
 		}
 		const identifier = await this.getUserIdentifier(user);
 
-		const key = this.buildRateLimitKey(RateLimitType.APP_CREATION, identifier);
+		const key = this.buildRateLimitKey(limitType, identifier);
 		
 		try {
-            const result = await this.enforce(env, key, config, RateLimitType.APP_CREATION);
+            const result = await this.enforce(env, key, config, limitType);
 			if (!result.success) {
 				this.logger.warn('App creation rate limit exceeded', {
 					identifier,
@@ -300,7 +312,7 @@ export class RateLimitService {
 					ip: request.headers.get('CF-Connecting-IP')
 				});
 				captureSecurityEvent('rate_limit_exceeded', {
-					limitType: RateLimitType.APP_CREATION,
+					limitType,
 					identifier,
 					key,
 					exceededLimit: result.exceededLimit,
@@ -309,8 +321,8 @@ export class RateLimitService {
 				});
 
 				// Build error message based on which limit was exceeded
-				const limitValue = result.limitValue ?? config.appCreation.limit;
-				const periodSeconds = result.periodSeconds ?? config.appCreation.period;
+				const limitValue = result.limitValue ?? config[limitType].limit;
+				const periodSeconds = result.periodSeconds ?? config[limitType].period;
 				const periodHours = periodSeconds / 3600;
 				const periodLabel = result.exceededLimit === 'daily'
 					? 'day'
@@ -318,7 +330,7 @@ export class RateLimitService {
 
 				throw new RateLimitExceededError(
 					`App creation rate limit exceeded. Maximum ${limitValue} apps per ${periodLabel}`,
-					RateLimitType.APP_CREATION,
+					limitType,
 					limitValue,
 					periodSeconds,
                     ['Please try again later when the limit resets for you.']

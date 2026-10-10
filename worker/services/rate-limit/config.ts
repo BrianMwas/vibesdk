@@ -52,6 +52,7 @@ export enum RateLimitType {
 	API_RATE_LIMIT = 'apiRateLimit',
 	AUTH_RATE_LIMIT = 'authRateLimit',
 	APP_CREATION = 'appCreation',
+	EMBEDDER_APP_CREATION = 'embedderAppCreation',
 	LLM_CALLS = 'llmCalls',
 	PUBLIC_APPS = 'publicApps',
 	SPACE_PREVIEW = 'spacePreview',
@@ -61,6 +62,7 @@ export interface RateLimitSettings {
 	[RateLimitType.API_RATE_LIMIT]: RLRateLimitConfig;
 	[RateLimitType.AUTH_RATE_LIMIT]: RLRateLimitConfig;
 	[RateLimitType.APP_CREATION]: DORateLimitConfig | KVRateLimitConfig;
+	[RateLimitType.EMBEDDER_APP_CREATION]: DORateLimitConfig | KVRateLimitConfig;
 	[RateLimitType.LLM_CALLS]: LLMCallsRateLimitConfig;
 	[RateLimitType.PUBLIC_APPS]: DORateLimitConfig | KVRateLimitConfig;
 	[RateLimitType.SPACE_PREVIEW]: DORateLimitConfig | KVRateLimitConfig;
@@ -83,6 +85,21 @@ export const DEFAULT_RATE_LIMIT_SETTINGS: RateLimitSettings = {
 		limit: 3,
 		dailyLimit: 3,
 		period: 24 * 60 * 60, // 24 hours
+	},
+	// An embedding platform (EMBEDDER_USER_IDS) creates every one of its
+	// customers' apps from one account and holds each customer to its own
+	// plan, so `appCreation` would let three of its customers build a day.
+	// This replaces it for those accounts: a platform-wide ceiling against a
+	// leaked key or a runaway loop, not a per-customer quota. Raise it in the
+	// stored platform config as the platform grows.
+	embedderAppCreation: {
+		enabled: true,
+		store: RateLimitStore.DURABLE_OBJECT,
+		limit: 1000,
+		dailyLimit: 1000,
+		period: 24 * 60 * 60, // 24 hours
+		burst: 400,
+		burstWindow: 60,
 	},
 	llmCalls: {
 		enabled: true,
