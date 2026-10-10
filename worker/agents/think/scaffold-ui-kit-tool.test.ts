@@ -86,7 +86,9 @@ describe('scaffold_ui_kit tool', () => {
 		expect(isComponent(kit.Sidebar)).toBe(true);
 		expect(typeof kit.Toaster).toBe('function');
 		expect(UI_KIT_JS).not.toMatch(/\brequire\(/);
-	});
+		// Importing the whole bundled kit takes well under a second alone, but much
+		// longer while the full suite runs in parallel.
+	}, 30_000);
 
 	it('compiles the theme tokens the frontend-design skill tells the model to override', () => {
 		for (const token of ['--background', '--primary', '--radius', '--border']) {

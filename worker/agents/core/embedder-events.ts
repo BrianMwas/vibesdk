@@ -167,11 +167,27 @@ export async function signDelivery(secret: string, id: string, timestamp: number
  */
 export const RETRY_DELAYS_MS: readonly number[] = [1_000, 5_000, 25_000];
 
+/**
+ * How long one attempt may take. A Worker holds only a few outbound
+ * connections at once, so a platform that accepts the connection and never
+ * answers would otherwise queue the build's own model calls behind it.
+ */
+export const ATTEMPT_TIMEOUT_MS = 10_000;
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Posts one event, retrying anything but a 2xx. Never throws: a platform that
- * is down must not break the build it is watching. Returns whether the
+ * Whether a refusal may succeed later. A 4xx says the delivery itself is wrong
+ * (a bad signature, an unknown address), so sending it again changes nothing;
+ * a timeout, rate limit or server error is the platform's to recover from.
+ */
+export function isRetryableStatus(status: number): boolean {
+	return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * Posts one event, retrying what can succeed later. Never throws: a platform
+ * that is down must not break the build it is watching. Returns whether the
  * platform accepted it.
  */
 export async function deliverEmbedderEvent(input: {
@@ -181,6 +197,7 @@ export async function deliverEmbedderEvent(input: {
 	fetchFn?: typeof fetch;
 	retryDelaysMs?: readonly number[];
 	wait?: (ms: number) => Promise<void>;
+	attemptTimeoutMs?: number;
 }): Promise<boolean> {
 	const body = JSON.stringify(input.delivery);
 	const id = `msg_${crypto.randomUUID()}`;
@@ -204,10 +221,12 @@ export async function deliverEmbedderEvent(input: {
 					'webhook-signature': signature,
 				},
 				body,
+				signal: AbortSignal.timeout(input.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS),
 			});
 			if (response.ok) return true;
+			if (!isRetryableStatus(response.status)) return false;
 		} catch {
-			// Unreachable this time; the next attempt may get through.
+			// Unreachable or too slow this time; the next attempt may get through.
 		}
 	}
 	return false;

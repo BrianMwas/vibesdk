@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deliverEmbedderEvent, forwardedEvent, isWebhookSecret, MAX_EVENT_TEXT, signDelivery, toEmbedderEvent, toQuestionEvent } from './embedder-events';
+import { deliverEmbedderEvent, forwardedEvent, isRetryableStatus, isWebhookSecret, MAX_EVENT_TEXT, signDelivery, toEmbedderEvent, toQuestionEvent } from './embedder-events';
 
 describe('toEmbedderEvent', () => {
 	it('translates what the platform needs to see', () => {
@@ -152,6 +152,47 @@ describe('deliverEmbedderEvent', () => {
 		expect(seen).toHaveLength(3);
 		expect(new Set(seen.map((headers) => headers['webhook-id'])).size).toBe(1);
 		expect(new Set(seen.map((headers) => headers['webhook-signature'])).size).toBe(1);
+	});
+
+	it('gives up at once on a refusal that cannot change, like a bad signature', async () => {
+		let attempts = 0;
+		const ok = await deliverEmbedderEvent({
+			url: 'https://speek.example/webhooks/vibesdk',
+			secret: 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw',
+			delivery,
+			fetchFn: async () => {
+				attempts++;
+				return new Response('Invalid signature', { status: 401 });
+			},
+			wait: async () => undefined,
+		});
+		expect(ok).toBe(false);
+		expect(attempts).toBe(1);
+	});
+
+	it('retries timeouts, rate limits and server errors only', () => {
+		for (const status of [408, 429, 500, 502, 503]) expect(isRetryableStatus(status)).toBe(true);
+		for (const status of [400, 401, 403, 404, 410, 422]) expect(isRetryableStatus(status)).toBe(false);
+	});
+
+	it('abandons an attempt the platform never answers, then tries again', async () => {
+		let attempts = 0;
+		const ok = await deliverEmbedderEvent({
+			url: 'https://speek.example/webhooks/vibesdk',
+			secret: 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw',
+			delivery,
+			attemptTimeoutMs: 5,
+			fetchFn: (_url, init) => {
+				attempts++;
+				if (attempts > 1) return Promise.resolve(new Response(null, { status: 204 }));
+				return new Promise<Response>((_resolve, reject) => {
+					init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason));
+				});
+			},
+			wait: async () => undefined,
+		});
+		expect(ok).toBe(true);
+		expect(attempts).toBe(2);
 	});
 
 	it('sends nothing with a malformed secret', async () => {
