@@ -105,6 +105,15 @@ export function toStoredContext(context: EmbedderContext): StoredEmbedderContext
 	return stored;
 }
 
+/** Whether this account is an embedding platform's, listed in `EMBEDDER_USER_IDS`. */
+export function isEmbedderAccount(userId: string, allowlist: string | undefined): boolean {
+	return (allowlist ?? '')
+		.split(',')
+		.map((id) => id.trim())
+		.filter(Boolean)
+		.includes(userId);
+}
+
 /**
  * Setting a deployment name lets a caller choose which Worker in the shared
  * dispatch namespace is overwritten, and a callback URL makes this Worker post
@@ -112,11 +121,7 @@ export function toStoredContext(context: EmbedderContext): StoredEmbedderContext
  * may set either.
  */
 export function mayChooseDeploymentName(userId: string, allowlist: string | undefined): boolean {
-	return (allowlist ?? '')
-		.split(',')
-		.map((id) => id.trim())
-		.filter(Boolean)
-		.includes(userId);
+	return isEmbedderAccount(userId, allowlist);
 }
 
 /**

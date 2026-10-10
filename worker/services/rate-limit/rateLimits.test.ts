@@ -146,3 +146,54 @@ describe('RateLimitService.getRequestIdentifier', () => {
 		expect(id).toBe('ip:unknown');
 	});
 });
+
+describe('RateLimitService.enforceAppCreationRateLimit', () => {
+	type AppCreationEnv = Parameters<typeof RateLimitService.enforceAppCreationRateLimit>[0];
+	type AppCreationUser = Parameters<typeof RateLimitService.enforceAppCreationRateLimit>[2];
+
+	function envFor(increment: ReturnType<typeof vi.fn>, embedders: string): AppCreationEnv {
+		return {
+			ENVIRONMENT: 'production',
+			EMBEDDER_USER_IDS: embedders,
+			DORateLimitStore: { getByName: vi.fn(() => ({ increment })) },
+		} as unknown as AppCreationEnv;
+	}
+
+	const user = (id: string) => ({ id }) as unknown as AppCreationUser;
+	const request = new Request('https://build.example.com/api/agent', { method: 'POST' });
+
+	it('holds an ordinary account to the per-account limit', async () => {
+		const increment = vi.fn().mockResolvedValue({ success: true });
+		await RateLimitService.enforceAppCreationRateLimit(envFor(increment, 'platform'), DEFAULT_RATE_LIMIT_SETTINGS, user('person'), request);
+
+		expect(increment).toHaveBeenCalledWith(
+			'platform:appCreation:user:person',
+			expect.objectContaining({ limit: 3, dailyLimit: 3 }),
+			1,
+		);
+	});
+
+	/**
+	 * One embedder account creates every one of its customers' apps, so the
+	 * per-account limit would let three of them build a day between them.
+	 */
+	it('holds an embedding platform to its own platform-wide ceiling instead', async () => {
+		const increment = vi.fn().mockResolvedValue({ success: true });
+		await RateLimitService.enforceAppCreationRateLimit(envFor(increment, 'other, platform'), DEFAULT_RATE_LIMIT_SETTINGS, user('platform'), request);
+
+		const ceiling = DEFAULT_RATE_LIMIT_SETTINGS.embedderAppCreation;
+		expect(ceiling.limit).toBeGreaterThan(DEFAULT_RATE_LIMIT_SETTINGS.appCreation.limit);
+		expect(increment).toHaveBeenCalledWith(
+			'platform:embedderAppCreation:user:platform',
+			expect.objectContaining({ limit: ceiling.limit }),
+			1,
+		);
+	});
+
+	it('still stops an embedding platform at its ceiling', async () => {
+		const increment = vi.fn().mockResolvedValue({ success: false, exceededLimit: 'daily', limitValue: 1000, periodSeconds: 86_400 });
+		await expect(
+			RateLimitService.enforceAppCreationRateLimit(envFor(increment, 'platform'), DEFAULT_RATE_LIMIT_SETTINGS, user('platform'), request),
+		).rejects.toThrow(/Maximum 1000 apps per day/);
+	});
+});

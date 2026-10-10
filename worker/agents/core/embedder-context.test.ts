@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	EMBEDDED_CLARIFY_STEPS,
 	EMBEDDER_LIMITS,
+	isEmbedderAccount,
 	isSafeSeedPath,
 	mayChooseDeploymentName,
 	parseEmbedderContext,
@@ -112,6 +113,20 @@ describe('mayChooseDeploymentName', () => {
 		expect(mayChooseDeploymentName('u1', undefined)).toBe(false);
 		expect(mayChooseDeploymentName('u1', '')).toBe(false);
 		expect(mayChooseDeploymentName('', ',,')).toBe(false);
+	});
+});
+
+describe('isEmbedderAccount', () => {
+	it('recognises the platform accounts and nobody else', () => {
+		expect(isEmbedderAccount('u1', ' u1 ,u2')).toBe(true);
+		expect(isEmbedderAccount('u3', 'u1,u2')).toBe(false);
+		expect(isEmbedderAccount('u1', undefined)).toBe(false);
+	});
+
+	it('agrees with who may choose a deployment name', () => {
+		for (const id of ['u1', 'u2', 'u3', '']) {
+			expect(mayChooseDeploymentName(id, 'u1,u2')).toBe(isEmbedderAccount(id, 'u1,u2'));
+		}
 	});
 });
 
