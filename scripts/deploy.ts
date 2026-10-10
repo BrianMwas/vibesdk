@@ -1785,8 +1785,16 @@ class CloudflareDeploymentManager {
 			'DISPATCH_NAMESPACE',
 			'ENVIRONMENT',
 			'PLATFORM_MODEL_PROVIDERS',
+			// The build model: unset, Think falls back to Gemini, which needs a Google key.
+			'THINK_MODEL_ID',
+			'PEXELS_API_KEY',
+			'ALLOWED_EMAIL',
+			// An embedding platform (Speek) driving builds through callbacks.
+			'EMBEDDER_WEBHOOK_SECRET',
+			'EMBEDDER_USER_IDS',
 		];
 
+		// Keep the secret this deployment already has: a new one signs everyone out.
 		const generatedJwtSecret = process.env.JWT_SECRET ? undefined : randomBytes(64).toString('base64url');
 		if (generatedJwtSecret) {
 			console.log('🔐 Generated JWT_SECRET for this deployment');
@@ -1801,7 +1809,7 @@ class CloudflareDeploymentManager {
 
 		// Add environment variables that are set
 		secretVars.forEach((varName) => {
-			let value = varName === 'JWT_SECRET' ? generatedJwtSecret : process.env[varName];
+			let value = varName === 'JWT_SECRET' ? (process.env.JWT_SECRET || generatedJwtSecret) : process.env[varName];
 			
 			// Apply fallback logic for CLOUDFLARE_AI_GATEWAY_TOKEN
 			if (varName === 'CLOUDFLARE_AI_GATEWAY_TOKEN' && (!value || value === '')) {

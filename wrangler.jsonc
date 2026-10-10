@@ -89,25 +89,15 @@
             "remote": true
         }
     ],
-    "artifacts": [
-        {
-            "binding": "ARTIFACTS",
-            "namespace": "vibesdk-production"
-        }
-    ],
 	"containers": [
 		{
 			"class_name": "UserAppSandboxService",
 			"image": "./SandboxDockerfile",
             // "image": "registry.cloudflare.com/vibesdk-production-userappsandboxservice:cfe197fc",
             // Altering max_instances value will have no effect. Please use the MAX_SANDBOX_INSTANCES var instead.
-			"max_instances": 1400,
+			"max_instances": 10,
             // ATTENTION: Altering instance_type value will have no effect. Please use the SANDBOX_INSTANCE_TYPE var instead.
-            "instance_type": {
-                "vcpu": 4,
-                "memory_mib": 8192,
-                "disk_mb": 10240
-            },
+            "instance_type": "standard-3",
             "rollout_step_percentage": 100,
 			"ssh": {
 				"enabled": true
@@ -115,13 +105,14 @@
 		}
 	],
 	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "vibesdk-db",
-			"database_id": "c4721a2b-b96a-428a-8b2a-b3d255b307e9",
-			"migrations_dir": "migrations"
-		}
-	],
+        {
+            "binding": "DB",
+            "database_name": "vibesdk-db",
+            "database_id": "522d0520-c45f-4eea-952a-b66c664401fd",
+            "migrations_dir": "migrations",
+            "remote": true
+        }
+    ],
 	"durable_objects": {
 		"bindings": [
 			{
@@ -156,15 +147,17 @@
         }
     ],
     "r2_buckets": [
-      {
-        "binding": "TEMPLATES_BUCKET",
-        "bucket_name": "vibesdk-templates"
-      }
+        {
+            "binding": "TEMPLATES_BUCKET",
+            "bucket_name": "vibesdk-templates",
+            "remote": true
+        }
     ],
     "kv_namespaces": [
         {
             "binding": "VibecoderStore",
-            "id": "f066f3c2e4824981b48e8586c04db9c1"
+            "id": "2267fb191f3a42b19f5144b4c70e95c1",
+            "remote": true
         }
     ],
     // "placement": {
@@ -205,21 +198,19 @@
 	],
 	"routes": [
         {
-            "pattern": "build.cloudflare.dev",
+            "pattern": "build.usespeek.app",
             "custom_domain": true
         },
         {
-            "pattern": "*build-preview.cloudflare.dev/*",
+            "pattern": "*build.usespeek.app/*",
             "custom_domain": false,
-            "zone_id": "db01fac4261b2604aacad8410443a3e2"
+            "zone_id": "4ff6685d0f1a81cb52303e36277e1baf"
         }
     ],
 	"vars": {
         "TEMPLATES_REPOSITORY": "https://github.com/cloudflare/vibesdk-templates",
         "DISPATCH_NAMESPACE": "vibesdk-default-namespace",
         "CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
-        // Cloudflare Artifacts namespace for the read-only Repo viewer proxy.
-        // Must match the `artifacts` binding namespace above.
         "ARTIFACTS_NAMESPACE": "vibesdk-production",
         "PLATFORM_CAPABILITIES": {
             "features": {
@@ -235,12 +226,18 @@
             },
             "version": "1.0.0"
         },
-        "CUSTOM_DOMAIN": "",
         "MAX_SANDBOX_INSTANCES": "10",
         "SANDBOX_INSTANCE_TYPE": "standard-3",
         "DEV_BROWSER_SIDECAR_URL": "http://127.0.0.1:9223",
-        "DEV_BROWSER_PREVIEW_ORIGIN": "http://localhost:5173"
+        "DEV_BROWSER_PREVIEW_ORIGIN": "http://localhost:5173",
+        "CUSTOM_DOMAIN": "build.usespeek.app"
     },
 	"workers_dev": false,
-	"preview_urls": false
+    "preview_urls": false,
+    "artifacts": [
+        {
+            "binding": "ARTIFACTS",
+            "namespace": "vibesdk-production"
+        }
+    ]
 }
