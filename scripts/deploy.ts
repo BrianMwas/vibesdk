@@ -1172,6 +1172,14 @@ class CloudflareDeploymentManager {
 				wildcardRoute,
 			];
 
+			// Cloudflare for SaaS custom hostnames keep the customer's Host header,
+			// so only a zone-wide catch-all route on the SaaS zone reaches this Worker.
+			const customDomainZoneId = process.env.CUSTOM_DOMAIN_ZONE_ID || this.config.vars?.CUSTOM_DOMAIN_ZONE_ID;
+			if (customDomainZoneId) {
+				console.log(`📋 Adding custom hostname catch-all route on zone ${customDomainZoneId}`);
+				expectedRoutes.push({ pattern: '*/*', custom_domain: false, zone_id: customDomainZoneId });
+			}
+
 			// Check if routes need updating
 			let needsUpdate = false;
 
@@ -1792,6 +1800,9 @@ class CloudflareDeploymentManager {
 			// An embedding platform (Speek) driving builds through callbacks.
 			'EMBEDDER_WEBHOOK_SECRET',
 			'EMBEDDER_USER_IDS',
+			// Per-app custom domains (Cloudflare for SaaS); requires manual
+			// one-time zone setup, see docs/custom-domains-setup.md.
+			'CUSTOM_DOMAIN_ZONE_ID',
 		];
 
 		// Keep the secret this deployment already has: a new one signs everyone out.

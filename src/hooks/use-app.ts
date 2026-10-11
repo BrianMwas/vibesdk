@@ -236,6 +236,100 @@ export function useUpdateAppVisibility(appId: string | undefined) {
 	};
 }
 
+export function useUpdateAppCustomDomain(appId: string | undefined) {
+	const queryClient = useQueryClient();
+	const { user } = useAuth();
+
+	const mutation = useMutation({
+		mutationFn: async ({
+			appId: targetAppId,
+			domain,
+		}: {
+			appId: string;
+			domain: string;
+		}) => {
+			const response = await apiClient.updateAppCustomDomain(targetAppId, domain);
+			if (!response.success || !response.data) {
+				throw new Error(response.error?.message || 'Failed to attach domain');
+			}
+			return response.data;
+		},
+		onSuccess: (data) => {
+			queryClient.setQueryData<AppDetailsData>(
+				queryKeys.account.apps.detail(appId!, user?.id),
+				(prev) =>
+					prev
+						? {
+								...prev,
+								customDomain: data.app.customDomain,
+								customDomainStatus: data.app.customDomainStatus,
+						  }
+						: prev,
+			);
+			void invalidateAppsQueries(queryClient);
+		},
+	});
+	const { reset, mutateAsync } = mutation;
+
+	useEffect(() => {
+		reset();
+	}, [appId, reset]);
+
+	return {
+		...mutation,
+		mutateAsync: async (domain: string) => {
+			if (!appId) {
+				throw new Error('App ID is required');
+			}
+			return mutateAsync({ appId, domain });
+		},
+	};
+}
+
+export function useAppCustomDomainStatus(appId: string | undefined, enabled: boolean) {
+	return useQuery({
+		queryKey: ['app-custom-domain-status', appId],
+		queryFn: async () => {
+			const response = await apiClient.getAppCustomDomainStatus(appId!);
+			if (!response.success || !response.data) {
+				throw new Error(response.error?.message || 'Failed to fetch domain status');
+			}
+			return response.data;
+		},
+		enabled: !!appId && enabled,
+		refetchInterval: (query) => {
+			const status = query.state.data?.app.customDomainStatus;
+			return status === 'pending' ? 5000 : false;
+		},
+	});
+}
+
+export function useDeleteAppCustomDomain(appId: string | undefined) {
+	const queryClient = useQueryClient();
+	const { user } = useAuth();
+
+	return useMutation({
+		mutationFn: async () => {
+			if (!appId) {
+				throw new Error('App ID is required');
+			}
+			const response = await apiClient.deleteAppCustomDomain(appId);
+			if (!response.success) {
+				throw new Error(response.error?.message || 'Failed to remove domain');
+			}
+			return response.data;
+		},
+		onSuccess: () => {
+			queryClient.setQueryData<AppDetailsData>(
+				queryKeys.account.apps.detail(appId!, user?.id),
+				(prev) =>
+					prev ? { ...prev, customDomain: null, customDomainStatus: null } : prev,
+			);
+			void invalidateAppsQueries(queryClient);
+		},
+	});
+}
+
 export function useDeleteApp() {
 	const queryClient = useQueryClient();
 

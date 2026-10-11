@@ -12,6 +12,7 @@ import {
 	useToggleAppStar,
 	useUpdateAppVisibility,
 } from '@/hooks/use-app';
+import { CustomDomainPanel } from '@/components/app/CustomDomainPanel';
 import { useAuth } from '@/contexts/auth-context';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
@@ -698,6 +699,23 @@ export default function AppView() {
 								</span>
 							),
 						},
+						...(isOwner
+							? [
+									{
+										value: 'domain',
+										label: (
+											<span className="inline-flex items-center gap-1.5">
+												<Globe className="size-3.5" />
+												Domain
+												{app.customDomain &&
+													app.customDomainStatus === 'active' && (
+														<span className="size-1.5 rounded-full bg-kumo-success" />
+													)}
+											</span>
+										),
+									},
+								]
+							: []),
 					]}
 				/>
 
@@ -1022,6 +1040,14 @@ export default function AppView() {
 							)}
 						</div>
 					</div>
+				)}
+
+				{activeTab === 'domain' && isOwner && (
+					<CustomDomainPanel
+						appId={app.id}
+						customDomain={app.customDomain}
+						customDomainStatus={app.customDomainStatus}
+					/>
 				)}
 			</div>
 

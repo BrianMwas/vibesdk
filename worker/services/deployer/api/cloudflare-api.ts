@@ -1,4 +1,4 @@
-import { AssetManifest, UploadAssetSession, WorkerMetadata } from '../types';
+import { AssetManifest, CloudflareApiError, CloudflareApiResponse, CloudflareCustomHostname, UploadAssetSession, WorkerMetadata } from '../types';
 import { getMimeType } from '../utils/index';
 
 /**
@@ -7,11 +7,21 @@ import { getMimeType } from '../utils/index';
 export class CloudflareAPI {
 	private readonly accountId: string;
 	private readonly apiToken: string;
+	private readonly zoneId?: string;
 	private readonly baseUrl = 'https://api.cloudflare.com/client/v4';
 
-	constructor(accountId: string, apiToken: string) {
+	constructor(accountId: string, apiToken: string, zoneId?: string) {
 		this.accountId = accountId;
 		this.apiToken = apiToken;
+		this.zoneId = zoneId;
+	}
+
+	/** Guards Custom Hostname operations, which require a zone id the caller didn't set up for plain Worker deploys. */
+	private requireZoneId(): string {
+		if (!this.zoneId) {
+			throw new Error('CloudflareAPI: zoneId is required for Custom Hostname operations');
+		}
+		return this.zoneId;
 	}
 
 	/**
@@ -340,6 +350,66 @@ export class CloudflareAPI {
 			);
 		} catch (error) {
 			console.error('❌ Failed to test worker endpoint:', error);
+		}
+	}
+
+	/**
+	 * Register a Custom Hostname (Cloudflare for SaaS) on the platform's zone,
+	 * with automatic HTTP-validated DV SSL. The hostname becomes verifiable
+	 * once its owner points a CNAME at the zone's configured fallback origin.
+	 */
+	async createCustomHostname(hostname: string): Promise<CloudflareCustomHostname> {
+		const zoneId = this.requireZoneId();
+		const response = await fetch(`${this.baseUrl}/zones/${zoneId}/custom_hostnames`, {
+			method: 'POST',
+			headers: this.getHeaders('application/json'),
+			body: JSON.stringify({
+				hostname,
+				ssl: { method: 'http', type: 'dv' },
+			}),
+		});
+		const data = (await response.json()) as CloudflareApiResponse<CloudflareCustomHostname>;
+		if (!response.ok || !data.success) {
+			throw new CloudflareApiError(
+				`Failed to create custom hostname '${hostname}': ${response.status} - ${JSON.stringify(data.errors)}`,
+				data.errors,
+			);
+		}
+		return data.result;
+	}
+
+	/**
+	 * Fetch the live status of a Custom Hostname — the source of truth for
+	 * verification/SSL issuance progress.
+	 */
+	async getCustomHostname(customHostnameId: string): Promise<CloudflareCustomHostname> {
+		const zoneId = this.requireZoneId();
+		const response = await fetch(
+			`${this.baseUrl}/zones/${zoneId}/custom_hostnames/${encodeURIComponent(customHostnameId)}`,
+			{ headers: this.getHeaders() },
+		);
+		const data = (await response.json()) as CloudflareApiResponse<CloudflareCustomHostname>;
+		if (!response.ok || !data.success) {
+			throw new CloudflareApiError(
+				`Failed to fetch custom hostname '${customHostnameId}': ${response.status} - ${JSON.stringify(data.errors)}`,
+				data.errors,
+			);
+		}
+		return data.result;
+	}
+
+	/**
+	 * Delete a Custom Hostname. Idempotent: a 404 (already gone) is treated as
+	 * success so detach flows never get stuck on a stale reference.
+	 */
+	async deleteCustomHostname(customHostnameId: string): Promise<void> {
+		const zoneId = this.requireZoneId();
+		const response = await fetch(
+			`${this.baseUrl}/zones/${zoneId}/custom_hostnames/${encodeURIComponent(customHostnameId)}`,
+			{ method: 'DELETE', headers: this.getHeaders() },
+		);
+		if (!response.ok && response.status !== 404) {
+			throw new Error(`Failed to delete custom hostname '${customHostnameId}': ${response.status} - ${await response.text()}`);
 		}
 	}
 }

@@ -18,6 +18,10 @@ declare namespace Cloudflare {
 		CF_ACCESS_SECRET: string;
 		CLOUDFLARE_AI_GATEWAY_URL: string;
 		CUSTOM_PREVIEW_DOMAIN: string;
+		// Zone id of the Cloudflare zone hosting CUSTOM_PREVIEW_DOMAIN, with
+		// Cloudflare for SaaS (Custom Hostnames) + a fallback origin configured.
+		// Required for per-app custom domains; see docs/custom-domains-setup.md.
+		CUSTOM_DOMAIN_ZONE_ID?: string;
 		GOOGLE_AI_STUDIO_API_KEY: string;
 		GOOGLE_CLIENT_ID: string;
 		GOOGLE_CLIENT_SECRET: string;

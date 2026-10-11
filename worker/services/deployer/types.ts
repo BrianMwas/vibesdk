@@ -170,3 +170,80 @@ export interface DeployConfig {
 export interface DispatchDeployConfig extends DeployConfig {
 	dispatchNamespace: string;
 }
+
+/**
+ * Cloudflare for SaaS custom hostname object.
+ * https://developers.cloudflare.com/api/operations/custom-hostname-for-a-zone-list-custom-hostnames
+ */
+export interface CloudflareCustomHostname {
+	id: string;
+	hostname: string;
+	status:
+		| 'active'
+		| 'pending'
+		| 'active_redeploying'
+		| 'moved'
+		| 'pending_deletion'
+		| 'deleted'
+		| 'pending_blocked'
+		| 'pending_migration'
+		| 'pending_provisioned'
+		| 'test_pending'
+		| 'test_active'
+		| 'test_active_apex'
+		| 'test_blocked'
+		| 'test_failed'
+		| 'provisioned'
+		| 'blocked';
+	ssl: {
+		id: string;
+		status:
+			| 'initializing'
+			| 'pending_validation'
+			| 'deleted'
+			| 'pending_issuance'
+			| 'pending_deployment'
+			| 'pending_deletion'
+			| 'pending_expiration'
+			| 'expired'
+			| 'active'
+			| 'initializing_timed_out'
+			| 'validation_timed_out'
+			| 'issuance_timed_out'
+			| 'deployment_timed_out'
+			| 'deletion_timed_out'
+			| 'pending_cleanup'
+			| 'staging_deployment'
+			| 'staging_active'
+			| 'deactivating'
+			| 'inactive'
+			| 'backup_issued'
+			| 'holding_deployment';
+		method: 'http' | 'txt' | 'email';
+		type: 'dv';
+		validation_errors?: Array<{ message: string }>;
+	};
+	verification_errors?: string[];
+	created_at: string;
+}
+
+/**
+ * Generic Cloudflare API response envelope.
+ */
+export interface CloudflareApiResponse<T> {
+	success: boolean;
+	result: T;
+	errors: Array<{ code: number; message: string }>;
+}
+
+/**
+ * Raised when a Cloudflare API call for custom hostnames fails, carrying the
+ * structured errors Cloudflare returns (e.g. code 1406 = hostname already
+ * registered) so callers can distinguish failure reasons.
+ */
+export class CloudflareApiError extends Error {
+	constructor(message: string, public readonly cfErrors?: Array<{ code: number; message: string }>) {
+		super(message);
+		this.name = 'CloudflareApiError';
+	}
+}

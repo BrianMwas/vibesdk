@@ -4,7 +4,7 @@
 
 import { BaseService } from './BaseService';
 import * as schema from '../schema';
-import { eq, and, or, desc, asc, sql, isNull, inArray } from 'drizzle-orm';
+import { eq, and, or, ne, desc, asc, sql, isNull, inArray } from 'drizzle-orm';
 import { generateId } from '../../utils/idGenerator';
 import { formatRelativeTime } from '../../utils/timeFormatter';
 import type {
@@ -16,10 +16,13 @@ import type {
     PublicAppQueryOptions,
     OwnershipResult,
     AppVisibilityUpdateResult,
+    AppCustomDomainUpdateResult,
     TimePeriod,
     PaginationParams
 } from '../types';
 import { ScreenshotSecurity } from 'worker/utils/screenshot-security';
+import { CloudflareApiError } from 'worker/services/deployer/types';
+import { buildPlatformCloudflareApi, isValidCustomHostname, mapCloudflareHostnameStatus } from 'worker/services/customDomain/cloudflareSaas';
 
 // Type definitions
 type WhereCondition = ReturnType<typeof eq> | ReturnType<typeof and> | ReturnType<typeof or> | undefined;
@@ -610,6 +613,245 @@ export class AppService extends BaseService {
     }
 
     /**
+     * Resolve the owning app for a verified custom domain. Mirrors
+     * getAppOwnershipByDeploymentId (primary DB, no cache, single indexed
+     * lookup) but additionally returns `deploymentId`, since the dispatcher
+     * must always be called with the real script name, never the custom
+     * hostname. Only matches domains Cloudflare has confirmed `active` — a
+     * `pending`/`failed` domain is treated as not-yet-routable.
+     */
+    async getAppOwnershipByCustomDomain(
+        hostname: string
+    ): Promise<{ id: string; userId: string | null; visibility: 'private' | 'public'; deploymentId: string | null } | null> {
+        const row = await this.database
+            .select({
+                id: schema.apps.id,
+                userId: schema.apps.userId,
+                visibility: schema.apps.visibility,
+                deploymentId: schema.apps.deploymentId,
+            })
+            .from(schema.apps)
+            .where(and(eq(schema.apps.customDomain, hostname), eq(schema.apps.customDomainStatus, 'active')))
+            .limit(1);
+
+        if (row.length === 0) {
+            return null;
+        }
+
+        return row[0];
+    }
+
+    /**
+     * Attach (or replace) a custom domain on an app the caller owns.
+     * Validates format, enforces uniqueness, registers the hostname with
+     * Cloudflare for SaaS, and persists `pending` status + the Cloudflare
+     * object id for later status polling.
+     */
+    async updateAppCustomDomain(
+        appId: string,
+        userId: string,
+        domain: string
+    ): Promise<AppCustomDomainUpdateResult> {
+        const normalized = domain.trim().toLowerCase();
+
+        const validation = isValidCustomHostname(normalized, this.env);
+        if (!validation.valid) {
+            return { success: false, error: validation.reason, errorCode: 'invalid_domain' };
+        }
+
+        const existingRows = await this.database
+            .select({
+                id: schema.apps.id,
+                userId: schema.apps.userId,
+                customDomain: schema.apps.customDomain,
+                customDomainCloudflareId: schema.apps.customDomainCloudflareId,
+            })
+            .from(schema.apps)
+            .where(eq(schema.apps.id, appId))
+            .limit(1);
+
+        if (existingRows.length === 0) {
+            return { success: false, error: 'App not found', errorCode: 'not_found' };
+        }
+        const existingApp = existingRows[0];
+
+        if (existingApp.userId !== userId) {
+            return { success: false, error: 'You can only manage domains on your own apps', errorCode: 'forbidden' };
+        }
+
+        // Re-attaching the same domain to the same app is a no-op.
+        if (existingApp.customDomain === normalized) {
+            const rows = await this.database
+                .select({
+                    id: schema.apps.id,
+                    customDomain: schema.apps.customDomain,
+                    customDomainStatus: schema.apps.customDomainStatus,
+                    customDomainError: schema.apps.customDomainError,
+                })
+                .from(schema.apps)
+                .where(eq(schema.apps.id, appId))
+                .limit(1);
+            return { success: true, app: rows[0] };
+        }
+
+        const taken = await this.database
+            .select({ id: schema.apps.id })
+            .from(schema.apps)
+            .where(and(eq(schema.apps.customDomain, normalized), ne(schema.apps.id, appId)))
+            .limit(1);
+        if (taken.length > 0) {
+            return { success: false, error: 'This domain is already attached to another app', errorCode: 'domain_taken' };
+        }
+
+        const cf = buildPlatformCloudflareApi(this.env);
+
+        // Replacing a previously-registered domain on this app: clean up the
+        // old Cloudflare hostname (best-effort, non-fatal).
+        if (existingApp.customDomainCloudflareId) {
+            try {
+                await cf.deleteCustomHostname(existingApp.customDomainCloudflareId);
+            } catch (error) {
+                this.logger.warn('[AppService] Failed to delete previous custom hostname', { appId, error });
+            }
+        }
+
+        let cfHostname;
+        try {
+            cfHostname = await cf.createCustomHostname(normalized);
+        } catch (error) {
+            const message = error instanceof CloudflareApiError ? error.message : 'Failed to register domain with Cloudflare';
+            this.logger.error('[AppService] Failed to create custom hostname', { appId, domain: normalized, error });
+            return { success: false, error: message, errorCode: 'cloudflare_error' };
+        }
+
+        try {
+            const updated = await this.database
+                .update(schema.apps)
+                .set({
+                    customDomain: normalized,
+                    customDomainStatus: 'pending',
+                    customDomainCloudflareId: cfHostname.id,
+                    customDomainError: null,
+                    customDomainCreatedAt: new Date(),
+                    updatedAt: new Date(),
+                })
+                .where(eq(schema.apps.id, appId))
+                .returning({
+                    id: schema.apps.id,
+                    customDomain: schema.apps.customDomain,
+                    customDomainStatus: schema.apps.customDomainStatus,
+                    customDomainError: schema.apps.customDomainError,
+                });
+            return { success: true, app: updated[0] };
+        } catch (error) {
+            // Unique-index race: another request attached this domain first.
+            this.logger.warn('[AppService] Custom domain write failed, rolling back Cloudflare registration', { appId, error });
+            await cf.deleteCustomHostname(cfHostname.id).catch(() => {});
+            return { success: false, error: 'This domain is already attached to another app', errorCode: 'domain_taken' };
+        }
+    }
+
+    /**
+     * Lazy-on-read status check: ask Cloudflare for the live status of this
+     * app's custom hostname, update the DB if it changed, and return the
+     * current state. Cloudflare's own object is the source of truth, so this
+     * is called whenever the owner opens the domain status view rather than
+     * via a background cron.
+     */
+    async getAppCustomDomainStatus(appId: string, userId: string): Promise<AppCustomDomainUpdateResult> {
+        const rows = await this.database
+            .select({
+                id: schema.apps.id,
+                userId: schema.apps.userId,
+                customDomain: schema.apps.customDomain,
+                customDomainStatus: schema.apps.customDomainStatus,
+                customDomainCloudflareId: schema.apps.customDomainCloudflareId,
+                customDomainError: schema.apps.customDomainError,
+            })
+            .from(schema.apps)
+            .where(eq(schema.apps.id, appId))
+            .limit(1);
+
+        if (rows.length === 0) {
+            return { success: false, error: 'App not found', errorCode: 'not_found' };
+        }
+        const row = rows[0];
+        if (row.userId !== userId) {
+            return { success: false, error: 'Forbidden', errorCode: 'forbidden' };
+        }
+        if (!row.customDomain || !row.customDomainCloudflareId) {
+            return { success: true, app: { id: row.id, customDomain: null, customDomainStatus: null, customDomainError: null } };
+        }
+
+        const cf = buildPlatformCloudflareApi(this.env);
+        let live;
+        try {
+            live = await cf.getCustomHostname(row.customDomainCloudflareId);
+        } catch (error) {
+            this.logger.warn('[AppService] Failed to fetch live custom hostname status, returning last-known state', { appId, error });
+            return { success: true, app: row };
+        }
+
+        const { status: nextStatus, error: nextError } = mapCloudflareHostnameStatus(live);
+
+        if (nextStatus !== row.customDomainStatus || nextError !== row.customDomainError) {
+            await this.database
+                .update(schema.apps)
+                .set({ customDomainStatus: nextStatus, customDomainError: nextError, updatedAt: new Date() })
+                .where(eq(schema.apps.id, appId));
+        }
+
+        return {
+            success: true,
+            app: { id: row.id, customDomain: row.customDomain, customDomainStatus: nextStatus, customDomainError: nextError },
+        };
+    }
+
+    /**
+     * Detach a custom domain: delete the Cloudflare custom hostname
+     * (best-effort) and clear the app's domain fields. Idempotent.
+     */
+    async deleteAppCustomDomain(appId: string, userId: string): Promise<AppCustomDomainUpdateResult> {
+        const rows = await this.database
+            .select({
+                id: schema.apps.id,
+                userId: schema.apps.userId,
+                customDomainCloudflareId: schema.apps.customDomainCloudflareId,
+            })
+            .from(schema.apps)
+            .where(eq(schema.apps.id, appId))
+            .limit(1);
+
+        if (rows.length === 0) {
+            return { success: false, error: 'App not found', errorCode: 'not_found' };
+        }
+        if (rows[0].userId !== userId) {
+            return { success: false, error: 'Forbidden', errorCode: 'forbidden' };
+        }
+
+        if (rows[0].customDomainCloudflareId) {
+            const cf = buildPlatformCloudflareApi(this.env);
+            await cf.deleteCustomHostname(rows[0].customDomainCloudflareId).catch((error) => {
+                this.logger.warn('[AppService] Failed to delete Cloudflare custom hostname', { appId, error });
+            });
+        }
+
+        await this.database
+            .update(schema.apps)
+            .set({
+                customDomain: null,
+                customDomainStatus: null,
+                customDomainCloudflareId: null,
+                customDomainError: null,
+                customDomainCreatedAt: null,
+                updatedAt: new Date(),
+            })
+            .where(eq(schema.apps.id, appId));
+
+        return { success: true, app: { id: appId, customDomain: null, customDomainStatus: null, customDomainError: null } };
+    }
+
+    /**
      * Read an app's current `previewVersion` from the PRIMARY DB (no cache) so a
      * visibility toggle that bumped it is observed on the very next preview
      * request (<1s revocation of outstanding space-preview tokens).
@@ -1123,9 +1365,27 @@ export class AppService extends BaseService {
                 return { success: false, error: 'You can only delete your own apps' };
             }
 
+            // Clean up any attached custom domain's Cloudflare hostname first —
+            // the DB row is about to be deleted, so this is the last chance to
+            // avoid leaving an orphaned Cloudflare custom hostname that would
+            // block re-registering the same domain on a different app later.
+            const customDomainRows = await this.database
+                .select({ customDomainCloudflareId: schema.apps.customDomainCloudflareId })
+                .from(schema.apps)
+                .where(eq(schema.apps.id, appId))
+                .limit(1);
+            const customDomainCloudflareId = customDomainRows[0]?.customDomainCloudflareId;
+            if (customDomainCloudflareId) {
+                await buildPlatformCloudflareApi(this.env)
+                    .deleteCustomHostname(customDomainCloudflareId)
+                    .catch((error) => {
+                        this.logger.warn('[AppService] Failed to delete custom hostname during app deletion', { appId, error });
+                    });
+            }
+
             // Delete related records first (foreign key constraints)
             // This follows the cascade delete pattern for data integrity
-            
+
             // Delete favorites
             await this.database
                 .delete(schema.favorites)

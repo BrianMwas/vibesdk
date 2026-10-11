@@ -31,7 +31,11 @@ export type {
   CreateAppData,
   UpdateAppVisibilityData,
   AppDeleteData,
-  AppWithUserAndStats
+  AppWithUserAndStats,
+  UpdateAppCustomDomainData,
+  AppCustomDomainStatusData,
+  DeleteAppCustomDomainData,
+  CustomDomainDnsInstructions
 } from 'worker/api/controllers/apps/types';
 
 export type {

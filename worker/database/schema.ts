@@ -190,7 +190,14 @@ export const apps = sqliteTable('apps', {
     // GitHub Repository Integration
     githubRepositoryUrl: text('github_repository_url'), // GitHub repository URL
     githubRepositoryVisibility: text('github_repository_visibility', { enum: ['public', 'private'] }), // Repository visibility
-    
+
+    // Custom Domain (Cloudflare for SaaS custom hostname)
+    customDomain: text('custom_domain'), // user-supplied hostname, lowercase, e.g. "app.example.com"
+    customDomainStatus: text('custom_domain_status', { enum: ['pending', 'active', 'failed'] }), // null when no domain attached
+    customDomainCloudflareId: text('custom_domain_cloudflare_id'), // Cloudflare custom_hostname `id`, needed for status polling + deletion
+    customDomainError: text('custom_domain_error'), // last verification/SSL error, surfaced to the owner
+    customDomainCreatedAt: integer('custom_domain_created_at', { mode: 'timestamp' }),
+
     // App Metadata
     isArchived: integer('is_archived', { mode: 'boolean' }).default(false),
     isFeatured: integer('is_featured', { mode: 'boolean' }).default(false), // Featured by admins
@@ -218,6 +225,7 @@ export const apps = sqliteTable('apps', {
     visibilityIdx: index('apps_visibility_idx').on(table.visibility),
     sessionTokenIdx: index('apps_session_token_idx').on(table.sessionToken),
     parentAppIdx: index('apps_parent_app_idx').on(table.parentAppId),
+    customDomainIdx: uniqueIndex('apps_custom_domain_idx').on(table.customDomain),
     // Performance indexes for common queries
     searchIdx: index('apps_search_idx').on(table.title, table.description),
     frameworkStatusIdx: index('apps_framework_status_idx').on(table.framework, table.status),
