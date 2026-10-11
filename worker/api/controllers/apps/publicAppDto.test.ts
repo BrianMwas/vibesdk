@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toPublicAppListItem, toPublicAppDetail } from './publicAppDto';
+import { canViewAppDetail, toPublicAppListItem, toPublicAppDetail } from './publicAppDto';
 import type { EnhancedAppData } from '../../../database/types';
 
 /**
@@ -164,5 +164,24 @@ describe('toPublicAppDetail (owner)', () => {
         const json = JSON.stringify(toPublicAppDetail(makeApp(), true));
         expect(json).not.toContain('anon-session-token-abc');
         expect(json).not.toContain('refined secret prompt');
+    });
+});
+
+describe('canViewAppDetail', () => {
+    it('shows a public app to anyone', () => {
+        expect(canViewAppDetail({ visibility: 'public', userId: 'owner' }, undefined)).toBe(true);
+        expect(canViewAppDetail({ visibility: 'public', userId: 'owner' }, 'someone-else')).toBe(true);
+    });
+
+    it('hides a private app from everyone but its owner', () => {
+        expect(canViewAppDetail({ visibility: 'private', userId: 'owner' }, 'someone-else')).toBe(false);
+        expect(canViewAppDetail({ visibility: 'private', userId: 'owner' }, undefined)).toBe(false);
+        expect(canViewAppDetail({ visibility: 'private', userId: 'owner' }, 'owner')).toBe(true);
+    });
+
+    it('hides an unlisted app the same way: it is served, not described', () => {
+        expect(canViewAppDetail({ visibility: 'unlisted', userId: 'owner' }, 'someone-else')).toBe(false);
+        expect(canViewAppDetail({ visibility: 'unlisted', userId: 'owner' }, undefined)).toBe(false);
+        expect(canViewAppDetail({ visibility: 'unlisted', userId: 'owner' }, 'owner')).toBe(true);
     });
 });

@@ -136,7 +136,7 @@ interface UserAppsParams extends PaginationParams {
 	period?: 'today' | 'week' | 'month' | 'all';
 	framework?: string;
 	search?: string;
-	visibility?: 'private' | 'public' | 'team' | 'board';
+	visibility?: 'private' | 'public' | 'team' | 'board' | 'unlisted';
 	status?: 'generating' | 'completed';
 	teamId?: string;
 }

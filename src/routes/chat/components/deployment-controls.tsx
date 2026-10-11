@@ -17,7 +17,7 @@ interface DeploymentControlsProps {
 
 	// App state
 	appId?: string;
-	appVisibility?: 'public' | 'private';
+	appVisibility?: 'public' | 'private' | 'unlisted';
 
 	// Generation state (kept for compatibility but pause button will not be rendered)
 	isGenerating: boolean;

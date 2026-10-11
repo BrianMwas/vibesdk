@@ -179,7 +179,7 @@ export const apps = sqliteTable('apps', {
     sessionToken: text('session_token'), // For anonymous users
     
     // Visibility and Sharing
-    visibility: text('visibility', { enum: ['private', 'public'] }).notNull().default('private'),
+    visibility: text('visibility', { enum: ['private', 'public', 'unlisted'] }).notNull().default('private'),
     
     // Status and State
     status: text('status', { enum: ['generating', 'completed'] }).notNull().default('generating'),
