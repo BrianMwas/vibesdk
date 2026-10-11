@@ -4,14 +4,18 @@ import { formatRelativeTime } from '../../../utils/timeFormatter';
 import { BaseController } from '../baseController';
 import { ApiResponse, ControllerResponse } from '../types';
 import type { RouteContext } from '../../types/route-context';
-import { 
+import {
     AppsListData,
     PublicAppsData,
     SingleAppData,
     FavoriteToggleData,
     UpdateAppVisibilityData,
-    AppDeleteData
+    AppDeleteData,
+    UpdateAppCustomDomainData,
+    AppCustomDomainStatusData,
+    DeleteAppCustomDomainData
 } from './types';
+import { getFallbackOriginHostname } from '../../../services/customDomain/cloudflareSaas';
 import { toPublicAppListItem } from './publicAppDto';
 import { parsePublicAppsQuery } from './publicAppsQuery';
 // import { withCache } from '../../../services/cache/wrapper';
@@ -247,6 +251,106 @@ export class AppController extends BaseController {
         } catch (error) {
             this.logger.error('Error updating app visibility:', error);
             return AppController.createErrorResponse<UpdateAppVisibilityData>('Failed to update app visibility', 500);
+        }
+    }
+
+    // Attach/replace a custom domain on an app
+    static async updateAppCustomDomain(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<ControllerResponse<ApiResponse<UpdateAppCustomDomainData>>> {
+        try {
+            const user = context.user!;
+
+            const appId = context.pathParams.id;
+            if (!appId) {
+                return AppController.createErrorResponse<UpdateAppCustomDomainData>('App ID is required', 400);
+            }
+
+            const bodyResult = await AppController.parseJsonBody(request);
+            if (!bodyResult.success) {
+                return bodyResult.response! as ControllerResponse<ApiResponse<UpdateAppCustomDomainData>>;
+            }
+
+            const domain = (bodyResult.data as { domain?: string })?.domain?.trim();
+            if (!domain) {
+                return AppController.createErrorResponse<UpdateAppCustomDomainData>('Domain is required', 400);
+            }
+
+            const appService = new AppService(env);
+            const result = await appService.updateAppCustomDomain(appId, user.id, domain);
+
+            if (!result.success) {
+                const statusCode = result.errorCode === 'not_found' ? 404
+                    : result.errorCode === 'forbidden' ? 403
+                    : result.errorCode === 'domain_taken' || result.errorCode === 'invalid_domain' ? 409
+                    : 502;
+                return AppController.createErrorResponse<UpdateAppCustomDomainData>(result.error || 'Failed to attach domain', statusCode);
+            }
+
+            const responseData: UpdateAppCustomDomainData = {
+                app: result.app!,
+                message: 'Domain registered. Add the DNS record below to verify it.',
+                dnsInstructions: { type: 'CNAME', name: result.app!.customDomain!, target: getFallbackOriginHostname(env) },
+            };
+            return AppController.createSuccessResponse(responseData);
+        } catch (error) {
+            this.logger.error('Error updating custom domain:', error);
+            return AppController.createErrorResponse<UpdateAppCustomDomainData>('Failed to update custom domain', 500);
+        }
+    }
+
+    // Live custom-domain verification status (polled by the owner)
+    static async getAppCustomDomainStatus(_request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<ControllerResponse<ApiResponse<AppCustomDomainStatusData>>> {
+        try {
+            const user = context.user!;
+
+            const appId = context.pathParams.id;
+            if (!appId) {
+                return AppController.createErrorResponse<AppCustomDomainStatusData>('App ID is required', 400);
+            }
+
+            const appService = new AppService(env);
+            const result = await appService.getAppCustomDomainStatus(appId, user.id);
+
+            if (!result.success) {
+                const statusCode = result.errorCode === 'not_found' ? 404 : result.errorCode === 'forbidden' ? 403 : 500;
+                return AppController.createErrorResponse<AppCustomDomainStatusData>(result.error || 'Failed to fetch domain status', statusCode);
+            }
+
+            const responseData: AppCustomDomainStatusData = {
+                app: result.app!,
+                message: '',
+                ...(result.app!.customDomain && result.app!.customDomainStatus === 'pending'
+                    ? { dnsInstructions: { type: 'CNAME' as const, name: result.app!.customDomain, target: getFallbackOriginHostname(env) } }
+                    : {}),
+            };
+            return AppController.createSuccessResponse(responseData);
+        } catch (error) {
+            this.logger.error('Error fetching custom domain status:', error);
+            return AppController.createErrorResponse<AppCustomDomainStatusData>('Failed to fetch domain status', 500);
+        }
+    }
+
+    // Detach a custom domain from an app
+    static async deleteAppCustomDomain(_request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<ControllerResponse<ApiResponse<DeleteAppCustomDomainData>>> {
+        try {
+            const user = context.user!;
+
+            const appId = context.pathParams.id;
+            if (!appId) {
+                return AppController.createErrorResponse<DeleteAppCustomDomainData>('App ID is required', 400);
+            }
+
+            const appService = new AppService(env);
+            const result = await appService.deleteAppCustomDomain(appId, user.id);
+
+            if (!result.success) {
+                const statusCode = result.errorCode === 'not_found' ? 404 : result.errorCode === 'forbidden' ? 403 : 500;
+                return AppController.createErrorResponse<DeleteAppCustomDomainData>(result.error || 'Failed to remove domain', statusCode);
+            }
+
+            return AppController.createSuccessResponse({ message: 'Custom domain removed' });
+        } catch (error) {
+            this.logger.error('Error deleting custom domain:', error);
+            return AppController.createErrorResponse<DeleteAppCustomDomainData>('Failed to remove custom domain', 500);
         }
     }
 

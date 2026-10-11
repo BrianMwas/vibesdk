@@ -62,6 +62,15 @@ export function setupAppRoutes(app: Hono<AppEnv>): void {
     // Update app visibility - OWNER ONLY
     appRouter.put('/:id/visibility', setAuthLevel(AuthConfig.ownerOnly), adaptController(AppController, AppController.updateAppVisibility));
 
+    // Attach/replace a custom domain - OWNER ONLY
+    appRouter.put('/:id/custom-domain', setAuthLevel(AuthConfig.ownerOnly), adaptController(AppController, AppController.updateAppCustomDomain));
+
+    // Live custom-domain verification status - OWNER ONLY
+    appRouter.get('/:id/custom-domain', setAuthLevel(AuthConfig.ownerOnly), adaptController(AppController, AppController.getAppCustomDomainStatus));
+
+    // Detach a custom domain - OWNER ONLY
+    appRouter.delete('/:id/custom-domain', setAuthLevel(AuthConfig.ownerOnly), adaptController(AppController, AppController.deleteAppCustomDomain));
+
     // Delete app - OWNER ONLY
     appRouter.delete('/:id', setAuthLevel(AuthConfig.ownerOnly), adaptController(AppController, AppController.deleteApp));
     

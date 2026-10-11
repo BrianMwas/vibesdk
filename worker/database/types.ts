@@ -73,7 +73,7 @@ export type PublicAppListData = Pick<
  * fields (userId, deploymentId) are populated only when the viewer owns the app.
  */
 export type PublicAppDetailData = PublicAppListData &
-    Pick<EnhancedAppData, 'originalPrompt'> & {
+    Pick<EnhancedAppData, 'originalPrompt' | 'customDomain' | 'customDomainStatus'> & {
         userId?: string | null;
         deploymentId?: string | null;
     };
@@ -171,6 +171,16 @@ export interface AppVisibilityUpdateResult {
     success: boolean;
     error?: string;
     app?: Pick<schema.App, 'id' | 'title' | 'visibility' | 'updatedAt'>;
+}
+
+/**
+ * Custom domain attach/status/detach operation result
+ */
+export interface AppCustomDomainUpdateResult {
+    success: boolean;
+    error?: string;
+    errorCode?: 'invalid_domain' | 'domain_taken' | 'not_found' | 'forbidden' | 'cloudflare_error';
+    app?: Pick<schema.App, 'id' | 'customDomain' | 'customDomainStatus' | 'customDomainError'>;
 }
 
 /**

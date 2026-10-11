@@ -85,8 +85,42 @@ function withPreviewCorsHeaders(env: Env, request: Request, response: Response):
     });
 }
 
+/** True when `hostname` matches the platform's own preview-subdomain pattern (`<deploymentId>.<previewDomain>` or `*.localhost`), as opposed to a per-app custom domain. */
+function isPreviewSubdomainHostname(hostname: string, env: Env): boolean {
+	const previewDomain = getPreviewDomain(env);
+	return hostname.endsWith(`.${previewDomain}`) || (hostname.endsWith('.localhost') && hostname !== 'localhost');
+}
+
 /**
- * Handles requests for user-deployed applications on subdomains.
+ * Resolves a request hostname to the deployment it should dispatch to, along
+ * with the owning app's visibility/ownership — via whichever strategy the
+ * hostname matches: the `<deploymentId>.<previewDomain>` subdomain convention,
+ * or a verified per-app custom domain. Both paths return the same shape so
+ * callers (the ownership/visibility gate, the dispatcher call) never need to
+ * know which one resolved the request.
+ */
+async function resolveAppDeployment(
+	hostname: string,
+	env: Env
+): Promise<{ deploymentId: string; ownership: { id: string; userId: string | null; visibility: 'private' | 'public' } } | null> {
+	const appService = new AppService(env);
+
+	if (isPreviewSubdomainHostname(hostname, env)) {
+		const deploymentId = hostname.split('.')[0];
+		const ownership = await appService.getAppOwnershipByDeploymentId(deploymentId);
+		if (!ownership) return null;
+		return { deploymentId, ownership };
+	}
+
+	// Not a recognized preview subdomain — resolve as a verified custom domain.
+	const ownership = await appService.getAppOwnershipByCustomDomain(hostname);
+	if (!ownership || !ownership.deploymentId) return null;
+	return { deploymentId: ownership.deploymentId, ownership };
+}
+
+/**
+ * Handles requests for user-deployed applications on subdomains or verified
+ * custom domains.
  * It first attempts to proxy to a live development sandbox. If that fails,
  * it dispatches the request to a permanently deployed worker via namespaces.
  * This function will NOT fall back to the main worker.
@@ -101,23 +135,27 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 	logger.info(`Handling user app request for: ${hostname}`);
 
 	// Check if this is an agent browser file serving request
-	// Pattern: b-{agentid}-{token}.{previewDomain}
-	const subdomain = hostname.split('.')[0];
-	if (subdomain.startsWith('b-')) {
-		// Extract agentId and token from subdomain
-		const withoutPrefix = subdomain.substring(2); // Remove 'b-'
-		const lastHyphenIndex = withoutPrefix.lastIndexOf('-');
+	// Pattern: b-{agentid}-{token}.{previewDomain}. Only applies on the
+	// platform's own preview subdomains — a custom domain's first label could
+	// coincidentally start with "b-" and must not be treated as this pattern.
+	if (isPreviewSubdomainHostname(hostname, env)) {
+		const subdomain = hostname.split('.')[0];
+		if (subdomain.startsWith('b-')) {
+			// Extract agentId and token from subdomain
+			const withoutPrefix = subdomain.substring(2); // Remove 'b-'
+			const lastHyphenIndex = withoutPrefix.lastIndexOf('-');
 
-		if (lastHyphenIndex !== -1) {
-			const agentId = withoutPrefix.substring(0, lastHyphenIndex);
-			logger.info(`Agent browser file serving request for agent: ${agentId}`);
+			if (lastHyphenIndex !== -1) {
+				const agentId = withoutPrefix.substring(0, lastHyphenIndex);
+				logger.info(`Agent browser file serving request for agent: ${agentId}`);
 
-			try {
-				const agentStub = await getAgentStub(env, agentId);
-				return await agentStub.handleBrowserFileServing(request);
-			} catch (error: any) {
-				logger.error(`Error forwarding to agent: ${error.message}`);
-				return new Response('Agent not found', { status: 404 });
+				try {
+					const agentStub = await getAgentStub(env, agentId);
+					return await agentStub.handleBrowserFileServing(request);
+				} catch (error: any) {
+					logger.error(`Error forwarding to agent: ${error.message}`);
+					return new Response('Agent not found', { status: 404 });
+				}
 			}
 		}
 	}
@@ -159,21 +197,20 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 		return new Response('This application is not currently available.', { status: 404 });
 	}
 
-	// Extract the app name (e.g., "xyz" from "xyz.build.cloudflare.dev").
-	// This subdomain equals the app's `deploymentId`.
-	const appName = subdomain;
-
 	// --- Visibility gate: private deployed apps are reachable by the owner only ---
 	// Consult the app's CURRENT visibility on every dispatch request (primary DB,
 	// no cache) so a public->private toggle takes effect within ~1s. Without this,
 	// toggling an app private still left the deployed worker URL publicly served.
-	const appService = new AppService(env);
-	const ownership = await appService.getAppOwnershipByDeploymentId(appName);
-	if (!ownership) {
-		// Fail closed: no owning app row for this deployment id.
-		logger.warn(`No app found for deployment '${appName}', refusing dispatch.`);
+	// Resolves via the preview-subdomain convention or a verified custom domain;
+	// either way `deploymentId` below is always the real dispatch script name,
+	// never the raw request hostname.
+	const resolved = await resolveAppDeployment(hostname, env);
+	if (!resolved) {
+		// Fail closed: no owning app row for this hostname/deployment id.
+		logger.warn(`No app found for host '${hostname}', refusing dispatch.`);
 		return new Response('This application is not currently available.', { status: 404 });
 	}
+	const { deploymentId, ownership } = resolved;
 
 	let ownerAuthedViaQuery = false;
 	if (ownership.visibility === 'private' && ownership.userId) {
@@ -185,11 +222,11 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 
 		let ownerId: string | null = null;
 		if (queryToken) {
-			ownerId = await verifyOwnerPreviewToken(env, queryToken, appName);
+			ownerId = await verifyOwnerPreviewToken(env, queryToken, deploymentId);
 			if (ownerId) ownerAuthedViaQuery = true;
 		}
 		if (!ownerId && cookieToken) {
-			ownerId = await verifyOwnerPreviewToken(env, cookieToken, appName);
+			ownerId = await verifyOwnerPreviewToken(env, cookieToken, deploymentId);
 		}
 
 		if (!ownerId || ownerId !== ownership.userId) {
@@ -202,7 +239,7 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 	const dispatcher = env['DISPATCHER'];
 
 	try {
-		const worker = dispatcher.get(appName);
+		const worker = dispatcher.get(deploymentId);
 		const dispatcherResponse = await worker.fetch(request);
 
 		// Add headers to identify this as a dispatcher response
@@ -229,7 +266,7 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 		});
 	} catch (error: any) {
 		// This block catches errors if the binding doesn't exist or if worker.fetch() fails.
-		logger.warn(`Error dispatching to worker '${appName}': ${error.message}`);
+		logger.warn(`Error dispatching to worker '${deploymentId}': ${error.message}`);
 
 		return new Response('An error occurred while loading this application.', { status: 500 });
 	}
@@ -265,9 +302,6 @@ const worker = {
 		// Normalize hostnames for both local development (localhost) and production.
 		const isMainDomainRequest =
 			hostname === env.CUSTOM_DOMAIN || hostname === 'localhost';
-		const isSubdomainRequest =
-			hostname.endsWith(`.${previewDomain}`) ||
-			(hostname.endsWith('.localhost') && hostname !== 'localhost');
 
 		if (separatePreviewDomain && hostname === previewDomain) {
 			const params = matchSpacePreviewParams(pathname);
@@ -334,8 +368,12 @@ const worker = {
 			return app.fetch(request, env, ctx);
 		}
 
-		// Route 2: User App Request (e.g., xyz.build.cloudflare.dev or test.localhost)
-		if (isSubdomainRequest) {
+		// Route 2: User App Request (e.g., xyz.build.cloudflare.dev, test.localhost,
+		// or a verified per-app custom domain). Anything that isn't the main
+		// platform domain or a recognized preview subdomain gets a chance to
+		// resolve as a custom domain (handleUserAppRequest / resolveAppDeployment
+		// 404s cleanly if it doesn't match any app).
+		if (!isMainDomainRequest) {
 			return handleUserAppRequest(request, env);
 		}
 

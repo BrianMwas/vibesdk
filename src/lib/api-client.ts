@@ -12,6 +12,9 @@ import type{
 	CreateAppData,
 	UpdateAppVisibilityData,
 	AppDeleteData,
+	UpdateAppCustomDomainData,
+	AppCustomDomainStatusData,
+	DeleteAppCustomDomainData,
 	AppDetailsData,
 	AppStarToggleData,
 	GitCloneTokenData,
@@ -542,6 +545,38 @@ class ApiClient {
 	 */
 	async deleteApp(appId: string): Promise<ApiResponse<AppDeleteData>> {
 		return this.request<AppDeleteData>(`/api/apps/${appId}`, {
+			method: 'DELETE',
+		});
+	}
+
+	/**
+	 * Attach (or replace) a custom domain on an app
+	 */
+	async updateAppCustomDomain(
+		appId: string,
+		domain: string,
+	): Promise<ApiResponse<UpdateAppCustomDomainData>> {
+		return this.request<UpdateAppCustomDomainData>(
+			`/api/apps/${appId}/custom-domain`,
+			{
+				method: 'PUT',
+				body: { domain },
+			},
+		);
+	}
+
+	/**
+	 * Fetch the live verification status of an app's custom domain
+	 */
+	async getAppCustomDomainStatus(appId: string): Promise<ApiResponse<AppCustomDomainStatusData>> {
+		return this.request<AppCustomDomainStatusData>(`/api/apps/${appId}/custom-domain`);
+	}
+
+	/**
+	 * Detach an app's custom domain
+	 */
+	async deleteAppCustomDomain(appId: string): Promise<ApiResponse<DeleteAppCustomDomainData>> {
+		return this.request<DeleteAppCustomDomainData>(`/api/apps/${appId}/custom-domain`, {
 			method: 'DELETE',
 		});
 	}

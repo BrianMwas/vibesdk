@@ -67,3 +67,35 @@ export interface AppDeleteData {
     success: boolean;
     message: string;
 }
+
+/**
+ * DNS instructions shown to the owner while a custom domain is pending verification.
+ */
+export interface CustomDomainDnsInstructions {
+    type: 'CNAME';
+    name: string;
+    target: string;
+}
+
+/**
+ * Response data for updateAppCustomDomain / getAppCustomDomainStatus
+ */
+export interface UpdateAppCustomDomainData {
+    app: {
+        id: string;
+        customDomain: string | null;
+        customDomainStatus: 'pending' | 'active' | 'failed' | null;
+        customDomainError?: string | null;
+    };
+    message: string;
+    dnsInstructions?: CustomDomainDnsInstructions;
+}
+
+export type AppCustomDomainStatusData = UpdateAppCustomDomainData;
+
+/**
+ * Response data for deleteAppCustomDomain
+ */
+export interface DeleteAppCustomDomainData {
+    message: string;
+}

@@ -2,6 +2,11 @@
 #CUSTOM_DOMAIN="your-domain.com" # Your custom domain for CORS
 #ENVIRONMENT="prod" # Options: dev, staging, prod
 
+# Per-app custom domains (Cloudflare for SaaS). Requires a one-time manual
+# setup: enabling Custom Hostnames + a fallback origin on the zone that hosts
+# CUSTOM_PREVIEW_DOMAIN. See docs/custom-domains-setup.md.
+#CUSTOM_DOMAIN_ZONE_ID="" # Zone id of the CUSTOM_PREVIEW_DOMAIN zone (e.g. speek.site)
+
 # Feature flags
 
 # Cloudflare Credentials (Required for manual deployment via `bun run deploy`)

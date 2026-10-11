@@ -83,5 +83,9 @@ export function toPublicAppDetail(
         originalPrompt: app.originalPrompt,
         userId: isOwner ? app.userId : undefined,
         deploymentId: isOwner ? app.deploymentId : undefined,
+        // Owner-only: visitors don't need to know a custom domain is (or
+        // isn't) attached, and the Cloudflare id/error text are internal.
+        customDomain: isOwner ? app.customDomain : null,
+        customDomainStatus: isOwner ? app.customDomainStatus : null,
     };
 }
