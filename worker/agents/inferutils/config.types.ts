@@ -208,6 +208,18 @@ const MODELS_MASTER = {
             contextSize: 400000, // 400K Context
         }
     },
+    // Chat Completions rejects function tools combined with reasoning_effort for this
+    // model, so only use it for stages that don't pass tools.
+    OPENAI_5_6_LUNA: {
+        id: 'openai/gpt-5.6-luna',
+        config: {
+            name: 'GPT-5.6 Luna',
+            size: ModelSize.REGULAR,
+            provider: 'openai',
+            creditCost: 0.8, // $0.20
+            contextSize: 1050000, // 1.05M Context
+        }
+    },
     // Below configs are commented for now, may be supported in the future
     // OPENAI_OSS: {
     //     id: 'openai/gpt-oss-120b',

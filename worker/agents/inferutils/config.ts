@@ -144,11 +144,11 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
         ...SHARED_IMPLEMENTATION_CONFIG,
     },
     firstPhaseImplementation: {
-        name: AIModels.OPENAI_5,
+        name: AIModels.OPENAI_5_6_LUNA,
         ...SHARED_IMPLEMENTATION_CONFIG,
     },
     phaseImplementation: {
-        name: AIModels.OPENAI_5,
+        name: AIModels.OPENAI_5_6_LUNA,
         ...SHARED_IMPLEMENTATION_CONFIG,
     },
     conversationalResponse: {
@@ -166,12 +166,13 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
         fallbackModel: AIModels.OPENAI_5_MINI,
     },
     fileRegeneration: {
-        name: AIModels.OPENAI_5,
+        name: AIModels.OPENAI_5_6_LUNA,
         reasoning_effort: 'low',
         max_tokens: 32000,
         temperature: 1,
-        fallbackModel: AIModels.OPENAI_5_MINI,
+        fallbackModel: AIModels.OPENAI_5,
     },
+    // Stays on GPT-5: passes tools with reasoning, which gpt-5.6-luna rejects on Chat Completions
     agenticProjectBuilder: {
         name: AIModels.OPENAI_5,
         reasoning_effort: 'high',
