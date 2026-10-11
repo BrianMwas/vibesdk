@@ -225,8 +225,8 @@ export class AppController extends BaseController {
             const visibility = (bodyResult.data as { visibility?: string })?.visibility;
 
             // Validate visibility value
-            if (!visibility || !['private', 'public'].includes(visibility)) {
-                return AppController.createErrorResponse<UpdateAppVisibilityData>('Visibility must be either "private" or "public"', 400);
+            if (!visibility || !['private', 'public', 'unlisted'].includes(visibility)) {
+                return AppController.createErrorResponse<UpdateAppVisibilityData>('Visibility must be "private", "public" or "unlisted"', 400);
             }
 
             const validVisibility = visibility as Visibility;

@@ -11,7 +11,7 @@ import {
     PreviewTokenData,
 } from './types';
 import { AgentSummary, BehaviorType } from '../../../agents/core/types';
-import { toPublicAppDetail } from '../apps/publicAppDto';
+import { canViewAppDetail, toPublicAppDetail } from '../apps/publicAppDto';
 import { createLogger } from '../../../logger';
 import { RateLimitService } from '../../../services/rate-limit/rateLimits';
 import { RateLimitExceededError } from 'shared/types/errors';
@@ -57,7 +57,7 @@ export class AppViewController extends BaseController {
             }
 
             // Check if user has permission to view
-            if (appResult.visibility === 'private' && appResult.userId !== userId) {
+            if (!canViewAppDetail(appResult, userId)) {
                 return AppViewController.createErrorResponse<AppDetailsData>('App not found', 404);
             }
 

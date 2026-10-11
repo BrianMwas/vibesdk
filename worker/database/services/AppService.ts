@@ -485,7 +485,7 @@ export class AppService extends BaseService {
         return {
             exists: true,
             isOwner: app.userId === userId,
-            visibility: app.visibility as 'private' | 'public' | null
+            visibility: app.visibility as 'private' | 'public' | 'unlisted' | null
         };
     }
 
@@ -536,7 +536,7 @@ export class AppService extends BaseService {
     async updateAppVisibility(
         appId: string,
         userId: string,
-        visibility: 'private' | 'public'
+        visibility: 'private' | 'public' | 'unlisted'
     ): Promise<AppVisibilityUpdateResult> {
         // Check if app exists and user owns it
         const existingApp = await this.database
@@ -594,7 +594,7 @@ export class AppService extends BaseService {
      */
     async getAppOwnershipByDeploymentId(
         deploymentId: string
-    ): Promise<{ id: string; userId: string | null; visibility: 'private' | 'public' } | null> {
+    ): Promise<{ id: string; userId: string | null; visibility: 'private' | 'public' | 'unlisted' } | null> {
         const row = await this.database
             .select({
                 id: schema.apps.id,
@@ -622,7 +622,7 @@ export class AppService extends BaseService {
      */
     async getAppOwnershipByCustomDomain(
         hostname: string
-    ): Promise<{ id: string; userId: string | null; visibility: 'private' | 'public'; deploymentId: string | null } | null> {
+    ): Promise<{ id: string; userId: string | null; visibility: 'private' | 'public' | 'unlisted'; deploymentId: string | null } | null> {
         const row = await this.database
             .select({
                 id: schema.apps.id,

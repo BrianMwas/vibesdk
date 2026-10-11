@@ -89,3 +89,12 @@ export function toPublicAppDetail(
         customDomainStatus: isOwner ? app.customDomainStatus : null,
     };
 }
+
+/**
+ * Whether a viewer may see an app's detail page, which shows its prompt and
+ * code. Others see only public apps: a private app is its owner's, and an
+ * unlisted one is served at its address but never described to anyone else.
+ */
+export function canViewAppDetail(app: { visibility: string; userId: string | null }, viewerId: string | null | undefined): boolean {
+    return app.visibility === 'public' || app.userId === viewerId;
+}

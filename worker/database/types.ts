@@ -9,7 +9,13 @@ import type { ModelConfig } from '../agents/inferutils/config.types';
 // CORE SHARED INTERFACES
 // ========================================
 
-export type Visibility = 'private' | 'public';
+/**
+ * Who can see an app. `unlisted` is served to anyone who has its address, like
+ * `public`, but is never listed, cloned or shown in detail to anyone but its
+ * owner, like `private`: for embedding platforms whose apps are their
+ * customers' public websites, not entries in a gallery.
+ */
+export type Visibility = 'private' | 'public' | 'unlisted';
 
 /**
  * Standard pagination interface used across all services
@@ -161,7 +167,7 @@ export interface PublicAppQueryOptions extends BaseAppQueryOptions {
 export interface OwnershipResult {
     exists: boolean;
     isOwner: boolean;
-    visibility?: 'private' | 'public' | null;
+    visibility?: Visibility | null;
 }
 
 /**

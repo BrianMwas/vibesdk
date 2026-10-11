@@ -34,7 +34,7 @@ interface App {
 	framework?: string | null;
 	updatedAt: Date | string | null;
 	updatedAtFormatted?: string;
-	visibility: 'private' | 'team' | 'board' | 'public';
+	visibility: 'private' | 'team' | 'board' | 'public' | 'unlisted';
 	userId?: string | null;
 	isFavorite?: boolean;
 }

@@ -102,7 +102,7 @@ function isPreviewSubdomainHostname(hostname: string, env: Env): boolean {
 async function resolveAppDeployment(
 	hostname: string,
 	env: Env
-): Promise<{ deploymentId: string; ownership: { id: string; userId: string | null; visibility: 'private' | 'public' } } | null> {
+): Promise<{ deploymentId: string; ownership: { id: string; userId: string | null; visibility: 'private' | 'public' | 'unlisted' } } | null> {
 	const appService = new AppService(env);
 
 	if (isPreviewSubdomainHostname(hostname, env)) {
@@ -213,6 +213,7 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 	const { deploymentId, ownership } = resolved;
 
 	let ownerAuthedViaQuery = false;
+	// `unlisted` falls through: served to anyone, it is only kept out of listings and details.
 	if (ownership.visibility === 'private' && ownership.userId) {
 		// Owner access on preview subdomains: main-domain session cookies are not
 		// sent cross-subdomain, so accept a deployment-scoped owner-preview token
