@@ -277,8 +277,8 @@ describe('render', () => {
 		expect(steps).toContain('exactly these sections, in this order: marketing-header, hero-split, feature-grid, contact, site-footer');
 		expect(steps).toContain('`radius` "sharp" and `mode` "dark", and no `theme`');
 		expect(steps).toContain('Signature element: The class timetable as a bold grid.');
-		expect(steps).toContain('`frontend-design-landing-page`');
-		expect(steps).not.toContain('design-archetypes');
+		expect(steps).toContain('`design-archetypes`');
+		expect(steps).toContain('without an icon in each item');
 	});
 
 	it('leaves an app\'s sections to the builder', () => {

@@ -87,12 +87,12 @@ export function renderDesignSteps(direction: DesignDirection): string[] {
 		'',
 		'## Frontend standard (required)',
 		'In the first building turn, before writing any frontend file:',
-		`1. Call \`activate_skill\` for \`frontend-design\`, \`cloudflare-bundler-apps\` and \`no-ai-design-slop\`${direction.kind === 'website' ? ', and `frontend-design-landing-page`' : ', and `frontend-design-saas`'}. Where they ask you to choose a palette or typefaces, use the decided ones.`,
+		`1. Call \`activate_skill\` for \`frontend-design\`, \`cloudflare-bundler-apps\` and \`no-ai-design-slop\`${direction.kind === 'website' ? ', `design-archetypes` and `web-design-guidelines` (its house rules win over every other skill)' : ', and `frontend-design-saas`'}. Where they ask you to choose a palette or typefaces, use the decided ones.`,
 		`2. Call \`scaffold_ui_kit\` with the site name as \`title\`, \`radius\` "${direction.radius}" and \`mode\` "${direction.mode}", and no \`theme\`. It keeps the existing \`public/styles.css\`. Do not edit the tokens or fonts in it; add page styles below the "Page styles" line.`,
 	];
 	if (direction.sections) {
 		steps.push(
-			`3. Call \`get_ui_blocks\` once with exactly these sections, in this order: ${direction.sections.join(', ')}. Build \`public/app.jsx\` from the returned code. Do not add, drop or reorder sections. Replace every placeholder with the real content.`,
+			`3. Call \`get_ui_blocks\` once with exactly these sections, in this order: ${direction.sections.join(', ')}. Build \`public/app.jsx\` from the returned code. Do not add, drop or reorder sections. Replace every placeholder with the real content.${direction.sections.includes('feature-grid') ? ' Build feature-grid without an icon in each item, and vary what the items hold: a row of identical icon cards is the house rules\' clearest ban.' : ''}`,
 		);
 	} else {
 		steps.push(
@@ -105,7 +105,9 @@ export function renderDesignSteps(direction: DesignDirection): string[] {
 			? `5. Signature element: ${direction.signature} Make it the page's one memorable moment, and use the highlight colour (\`bg-highlight\`, \`text-highlight\`, \`border-highlight\`) for it and nowhere else.`
 			: '5. Give the page one memorable element tied to this business, and use the highlight colour (`bg-highlight`, `text-highlight`, `border-highlight`) for it and nowhere else.',
 		'6. Keep the first screen uncluttered: one headline, one supporting sentence, at most two actions. Hours, address, phone numbers, badges and trust points belong further down or in the footer.',
-		'7. Before the final `deploy_space` of a building turn, activate `audit-ai-design-slop`, list each issue it finds in what you built, and fix them before deploying.',
+		direction.kind === 'website'
+			? '7. Before the final `deploy_space` of a building turn, go through the graded review in `web-design-guidelines` and the house rules in `design-archetypes`, then activate `audit-ai-design-slop`; list each issue in what you built and fix every critical and serious one before deploying.'
+			: '7. Before the final `deploy_space` of a building turn, activate `audit-ai-design-slop`, list each issue it finds in what you built, and fix them before deploying.',
 		'On later turns, skills you already activated in this conversation stay in effect.',
 	);
 	return steps;

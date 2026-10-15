@@ -1,15 +1,88 @@
 ---
 name: web-design-guidelines
-description: Review UI code against the Web Interface Guidelines (accessibility, focus, forms, animation, typography, images, performance, navigation, touch, theming, i18n). Use before every deploy_space on a customer-facing site, and whenever asked to review or audit UI.
+description: Decide hierarchy, spacing, type and colour by principle before writing UI, then review it against the Web Interface Guidelines (accessibility, focus, forms, animation, typography, images, performance, navigation, touch, theming, i18n) and a graded accessibility and visual-design review, fixing every critical and serious finding. Use before every deploy_space on a customer-facing site, and whenever asked to review or audit UI.
 metadata:
   author: vercel
   version: "1.0.0"
-  source: https://github.com/vercel-labs/web-interface-guidelines (command.md), vendored because this agent has no network tool
+  source: https://github.com/vercel-labs/web-interface-guidelines (command.md), vendored because this agent has no network tool. The principles and the graded review are adapted from Better Design (github.com/marvkr/better-design, MIT, see LICENSE-better-design.txt), whose MCP this agent cannot reach.
 ---
 
 # Web Interface Guidelines
 
-Check the files you wrote against the rules below before you call `deploy_space`, and fix every violation. Report only what you cannot fix. Findings are terse, grouped by file, as `file:line - issue`.
+Before writing, decide the page by the principles below. Before you call `deploy_space`, check the files you wrote against the rules and the graded review, and fix every violation. Report only what you cannot fix. Findings are terse, grouped by file, as `file:line - issue`.
+
+### Decide before writing (Better Design principles)
+
+**Hierarchy**
+- One focal point per screen and one primary action per flow. If everything is emphasised, nothing is.
+- Use size, weight, placement and contrast before labels, badges and captions.
+- Group by proximity before containers: related things sit closer than unrelated ones.
+
+**Spacing**
+- One spacing scale (4 or 8px based), used everywhere. No one-off values.
+- Space inside a group is smaller than space between groups, and space between sections is larger
+  still.
+- Align to a small number of shared edges.
+
+**Typography**
+- A clear scale with few sizes far apart. Body text at 16px or more, line length 45 to 75 characters,
+  leading around 1.5.
+- Weight and size carry hierarchy; colour does not do it alone.
+- At most two families.
+
+**Colour**
+- Semantic roles (background, foreground, primary, muted, border, destructive), used through tokens,
+  never raw values in components.
+- The primary colour marks the primary action, not decoration.
+- Flat fills. Depth from a step in tone, not from gradients or glows.
+
+**Depth and shape**
+- Shadow only on what floats above the page (menus, dialogs, popovers). Resting surfaces separate by
+  tone.
+- Radius is decided once per role (controls, surfaces, media) and kept.
+
+**Forms and interaction**
+- Every input has a visible label, not just a placeholder. Errors say what went wrong and how to fix
+  it, next to the field.
+- Every interactive element has hover, active, focus-visible and disabled states.
+- Touch targets at least 44 by 44px. Links look like links.
+
+**Motion**
+- Motion explains a change of state, place or cause. Transform and opacity only, 150 to 300ms for
+  controls, with a `prefers-reduced-motion` fallback.
+
+**Navigation**
+- The current page is shown in the navigation. Every page is reachable in one tap from the menu on a
+  phone.
+
+### Graded review (Better Design)
+
+Grade what you find, and fix every critical and serious finding before `deploy_space`. Moderate findings are fixed when the fix is local.
+
+**Accessibility**
+- Critical: body text contrast below 4.5:1, or large text and essential icons below 3:1, against
+  their real background.
+- Critical: an interactive element with no visible focus state, or one that cannot be reached and
+  used with the keyboard.
+- Critical: an image that carries meaning with no alt text; a control with no accessible name (an
+  icon-only button needs `aria-label`).
+- Serious: a form field without a programmatic label; an error shown only by colour.
+- Serious: headings that skip levels, or more than one `h1` on a page.
+- Serious: touch targets under 44px on a phone; text that cannot be zoomed to 200% without loss.
+- Serious: motion with no reduced-motion fallback; anything that flashes.
+- Moderate: links that are only distinguished by colour inside running text.
+
+**Visual design**
+- Serious: no clear focal point on a screen, or two primary actions competing.
+- Serious: inconsistent spacing (values off the scale, groups not separated more than their items).
+- Serious: more than five type sizes, or body text under 16px or in low-contrast grey.
+- Serious: components left on the kit's default theme, or raw colour values instead of tokens.
+- Serious: content that overflows or is clipped at 390px wide.
+- Moderate: mixed icon families, mixed radii within one role, mixed shadow styles.
+- Moderate: decoration doing a job that hierarchy should do (badges, eyebrows, dividers to separate
+  what space could).
+
+Write the findings down with their grade, fix them, then read the changed parts once more. On a business's website, also check the house rules in `design-archetypes`: a gradient, a shadow on a resting surface, an eyebrow label, monospace labels, 01/02/03 numbering, a hairline divider or a row of icon cards is a serious finding.
 
 ## Rules
 

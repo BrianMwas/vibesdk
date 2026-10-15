@@ -29,7 +29,9 @@ Rules:
 - sections (websites only): the page's sections in order, from the listed blocks. Start with marketing-header and one hero, end with site-footer. Use a block only when the page needs it and the request supplies its content: testimonials only when real quotes are given, pricing only when real prices are given. Never pad the page.
 - Pick the hero for what the business can show: hero-split for a place, a craft or a physical product a photo can show; hero-product for software, apps and online tools; hero-workflow when the value is in how the work gets done; hero-statement for studios, agencies and firms that sell judgement or taste.
 - Add process-steps when customers need to know what happens after they get in touch, or process-interactive when each step has enough to show on its own. Use stats-band only when the request gives real figures.
-- signature: one sentence naming a single memorable element tied to this business (for example "the menu's daily specials set as a chalkboard-style list"), not a visual effect.`;
+- Use feature-grid only when the business really has a set of parallel services to list, never as filler: a row of icon cards is the most recognisable generated-site pattern. Prefer a section that shows the real thing.
+- If the business's own colours or material point somewhere (its paint, its produce, its landscape), choose the palette closest to them, not the category default.
+- signature: one sentence naming a single memorable element tied to this business (for example "the menu's daily specials set as a chalkboard-style list"), not a visual effect. Write it as "On this page, [something that belongs to this business] becomes [a device on the page]", and test it: if the nearest competitor's name would fit the same sentence, it belongs to the category, so choose again from the business's name, place, products, hours or the printed things of its world.`;
 
 function describeOptions(seed: string): { text: string; paletteIds: [string, ...string[]]; fontIds: [string, ...string[]] } {
 	const { palettes, fonts } = shortlist(seed);
