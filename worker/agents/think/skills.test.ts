@@ -3,6 +3,8 @@ import { parseSkillMarkdown } from 'agents/skills';
 import DESIGN_ARCHETYPES from './skills/design-archetypes/SKILL.md?raw';
 import FRONTEND_DESIGN from './skills/frontend-design/SKILL.md?raw';
 import WEB_DESIGN_GUIDELINES from './skills/web-design-guidelines/SKILL.md?raw';
+import DESIGN_TASTE from './skills/design-taste/SKILL.md?raw';
+import BETTER_DESIGN from './skills/better-design/SKILL.md?raw';
 import { createThinkSkillSource } from './skills';
 
 function channel(hex: string): [number, number, number] {
@@ -48,6 +50,8 @@ describe('design skills', () => {
 		['design-archetypes', DESIGN_ARCHETYPES],
 		['frontend-design', FRONTEND_DESIGN],
 		['web-design-guidelines', WEB_DESIGN_GUIDELINES],
+		['design-taste', DESIGN_TASTE],
+		['better-design', BETTER_DESIGN],
 	];
 
 	it.each(cases)('%s parses and is named after its directory', (dir, raw) => {
