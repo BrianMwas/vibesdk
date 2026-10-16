@@ -1,6 +1,15 @@
 import { AssetManifest, CloudflareApiError, CloudflareApiResponse, CloudflareCustomHostname, UploadAssetSession, WorkerMetadata } from '../types';
 import { getMimeType } from '../utils/index';
 
+/** The API's error envelope, or nothing when the body is not JSON (a gateway error page, say), so the raw text is reported instead. */
+function parseApiError(body: string): { errors?: { code?: number; message?: string }[] } {
+	try {
+		return JSON.parse(body) as { errors?: { code?: number; message?: string }[] };
+	} catch {
+		return {};
+	}
+}
+
 /**
  * Cloudflare API client for Worker deployment operations
  */
@@ -184,11 +193,11 @@ export class CloudflareAPI {
 
 		if (!response.ok) {
 			const error = await response.text();
-			const errorObj = JSON.parse(error);
+			const errorObj = parseApiError(error);
 
 			// Check if error is about migrations for existing DO classes
 			if (errorObj.errors?.[0]?.code === 10074) {
-				const errorMessage = errorObj.errors[0].message;
+				const errorMessage = errorObj.errors[0].message ?? '';
 				const existingClassMatch =
 					errorMessage.match(/class '([^']+)'/);
 				const existingClass = existingClassMatch
@@ -272,7 +281,7 @@ export class CloudflareAPI {
 
 				if (!retryResponse.ok) {
 					const retryError = await retryResponse.text();
-					const retryErrorObj = JSON.parse(retryError);
+					const retryErrorObj = parseApiError(retryError);
 
 					// If still failing with same error, recursively handle it
 					if (retryErrorObj.errors?.[0]?.code === 10074) {

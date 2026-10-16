@@ -23,6 +23,25 @@ export function buildSpacePreviewPath(spaceName: string, branch: string): string
     return `/space/${encodeURIComponent(spaceName)}/preview/${encodeURIComponent(branch)}/`;
 }
 
+const PREVIEW_LABEL_SUFFIX = '-preview';
+const MAX_DNS_LABEL = 63;
+
+/**
+ * The subdomain an embedded site is previewed on: its deployment name with
+ * `-preview`, so `acme.example.site` previews at `acme-preview.example.site`.
+ * Served at the root of its own host, a client-side router sees the paths it
+ * was written for. Null when the label would be too long for DNS.
+ */
+export function embeddedPreviewLabel(deploymentName: string): string | null {
+    const label = `${deploymentName}${PREVIEW_LABEL_SUFFIX}`;
+    return label.length <= MAX_DNS_LABEL ? label : null;
+}
+
+/** Whether a host's first label has the shape of an embedded preview host. */
+export function looksLikeEmbeddedPreviewHost(hostname: string): boolean {
+    return hostname.split('.')[0].endsWith(PREVIEW_LABEL_SUFFIX);
+}
+
 /** True when the host is a loopback (localhost / 127.0.0.1 / etc), with or without port. */
 export function isLocalHost(host: string): boolean {
     if (!host) return false;

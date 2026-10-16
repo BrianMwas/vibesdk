@@ -13,7 +13,7 @@ vi.mock('../../database/services/AppService', () => ({
 	},
 }));
 
-const { handleSpacePreview } = await import('./space-preview');
+const { handleHostPreview, handleSpacePreview, PREVIEW_MOUNT_HEADER } = await import('./space-preview');
 const {
 	buildPreviewCookie,
 	signSpacePreviewToken,
@@ -166,5 +166,57 @@ describe('handleSpacePreview', () => {
 		expect(setCookie).toContain('Partitioned');
 		// The generated app never sees the token.
 		expect(new URL(capture.lastRequest!.url).searchParams.get('t')).toBeNull();
+	});
+});
+
+describe('handleHostPreview', () => {
+	const HOST = 'acme-preview.example.site';
+	const claims = { spaceName: 'space-a', branch: 'main', userId: 'user-a', previewVersion: 0 };
+	const hostRequest = (path: string, init?: RequestInit) => new Request(`https://${HOST}${path}`, init);
+
+	it('serves the site at the root of its host, mounted at root, and sets a host-wide cookie', async () => {
+		const capture: ForwardCapture = { lastRequest: null };
+		const env = makeEnv({}, capture);
+		const token = await signSpacePreviewToken(env, { ...claims, host: HOST });
+
+		const res = await handleHostPreview(hostRequest(`/menu?t=${encodeURIComponent(token)}`), env, HOST);
+		expect(res?.status).toBe(200);
+		const forwarded = new URL(capture.lastRequest!.url);
+		expect(forwarded.pathname).toBe('/space/space-a/preview/main/menu');
+		expect(forwarded.searchParams.get('t')).toBeNull();
+		expect(capture.lastRequest!.headers.get(PREVIEW_MOUNT_HEADER)).toBe('root');
+		const setCookie = res?.headers.get('Set-Cookie') ?? '';
+		expect(setCookie).toContain('Path=/;');
+		// Sent inside the embedder's iframe, where a Lax cookie never is.
+		expect(setCookie).toContain('SameSite=None');
+		expect(setCookie).toContain('Secure');
+		expect(setCookie).toContain('Partitioned');
+	});
+
+	it('accepts the cookie on later requests', async () => {
+		const env = makeEnv();
+		const token = await signSpacePreviewToken(env, { ...claims, host: HOST });
+		const res = await handleHostPreview(hostRequest('/assets/app.js', { headers: { Cookie: `${SPACE_PREVIEW_COOKIE_NAME}=${token}` } }), env, HOST);
+		expect(res?.status).toBe(200);
+	});
+
+	it('falls through for a token minted for another host or for the path preview', async () => {
+		const env = makeEnv();
+		const other = await signSpacePreviewToken(env, { ...claims, host: 'other-preview.example.site' });
+		const pathOnly = await signSpacePreviewToken(env, claims);
+		expect(await handleHostPreview(hostRequest(`/?t=${encodeURIComponent(other)}`), env, HOST)).toBeNull();
+		expect(await handleHostPreview(hostRequest(`/?t=${encodeURIComponent(pathOnly)}`), env, HOST)).toBeNull();
+		expect(await handleHostPreview(hostRequest('/'), env, HOST)).toBeNull();
+	});
+
+	it('drops a mount header the visitor sent on the path preview', async () => {
+		const capture: ForwardCapture = { lastRequest: null };
+		const env = makeEnv({}, capture);
+		const token = await signSpacePreviewToken(env, claims);
+		const request = new Request(`https://example.com/space/space-a/preview/main/?t=${encodeURIComponent(token)}`, {
+			headers: { [PREVIEW_MOUNT_HEADER]: 'root' },
+		});
+		await handleSpacePreview(request, env, 'space-a', 'main');
+		expect(capture.lastRequest!.headers.get(PREVIEW_MOUNT_HEADER)).toBeNull();
 	});
 });

@@ -36,5 +36,6 @@ declare namespace Cloudflare {
 		SENTRY_DSN: string;
 		SERPAPI_KEY: string;
 		THINK_MODEL_ID?: string;
+		THINK_REASONING_EFFORT?: string;
 	}
 }

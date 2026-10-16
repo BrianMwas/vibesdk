@@ -838,17 +838,23 @@ export class SpaceDO extends DurableObject<Env> {
       const spaceName = this.ctx.id.name ?? "space"
       const basePath = `/space/${spaceName}/preview/${encodeURIComponent(branch)}`
 
+      // The host worker marks a preview served at the root of its own
+      // subdomain; its links already resolve and must not be prefixed.
+      const mountedAtRoot = request.headers.get(PREVIEW_MOUNT_HEADER) === "root"
+
       // Rewrite the URL so the dynamic worker sees a clean path
       const subPath = previewMatch[2] || "/"
       const previewUrl = new URL(subPath, url.origin)
       previewUrl.search = url.search
       const previewRequest = new Request(previewUrl.toString(), request)
+      previewRequest.headers.delete(PREVIEW_MOUNT_HEADER)
       const response = await this.servePreview(branch, previewRequest)
 
       // Strip headers a generated app must not be able to set on the shared
       // preview origin (e.g. Service-Worker-Allowed scope expansion) before
       // any further rewriting.
       const safeResponse = stripPreviewSecurityHeaders(response)
+      if (mountedAtRoot) return safeResponse
 
       // Rewrite root-relative paths in HTML responses so they resolve
       // correctly when the preview is mounted on a sub-path
@@ -869,6 +875,9 @@ export class SpaceDO extends DurableObject<Env> {
     return new Response("Not Found", { status: 404 })
   }
 }
+
+/** Set by the host worker when a preview is served at the root of its own host. */
+const PREVIEW_MOUNT_HEADER = "X-Space-Preview-Mount"
 
 // ─── Preview Response Rewriting ──────────────────────────────────────────────
 // When a preview is served on /space/:name/preview/:branch/, root-relative

@@ -1,6 +1,9 @@
 import {
+	buildHostPreviewCookie,
 	buildPreviewCookie,
+	EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS,
 	readPreviewCookie,
+	verifyHostPreviewToken,
 	verifySpacePreviewToken,
 	type SpacePreviewClaims,
 } from '../../utils/spacePreviewToken';
@@ -10,6 +13,13 @@ import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { getGlobalConfigurableSettings } from '../../config';
 import { RateLimitExceededError } from 'shared/types/errors';
 import { JWTUtils } from '../../utils/jwtUtils';
+
+/**
+ * Tells SpaceDO the preview is served at the root of its own host, so it must
+ * not prefix root-relative links with the path-preview mount. Set only here,
+ * after any copy the visitor sent is removed.
+ */
+export const PREVIEW_MOUNT_HEADER = 'X-Space-Preview-Mount';
 
 const SPACE_PREVIEW_ROUTE_PATTERN = /^\/space\/([^/]+)\/preview\/([^/]+)(?:\/.*)?$/;
 
@@ -40,6 +50,7 @@ async function forwardToSpacePreview(
 	request: Request,
 	env: Env,
 	spaceName: string,
+	rootOf?: { branch: string },
 ): Promise<Response> {
 	const namespace = getSpaceNamespace(env);
 	if (!namespace) {
@@ -48,7 +59,12 @@ async function forwardToSpacePreview(
 	// Strip `?t=` so the generated app never sees the token.
 	const forwardedUrl = new URL(request.url);
 	forwardedUrl.searchParams.delete('t');
+	if (rootOf) {
+		forwardedUrl.pathname = `/space/${encodeURIComponent(spaceName)}/preview/${encodeURIComponent(rootOf.branch)}${forwardedUrl.pathname}`;
+	}
 	const forwardedRequest = new Request(forwardedUrl.toString(), request);
+	forwardedRequest.headers.delete(PREVIEW_MOUNT_HEADER);
+	if (rootOf) forwardedRequest.headers.set(PREVIEW_MOUNT_HEADER, 'root');
 	const stub = namespace.get(namespace.idFromName(spaceName));
 	try {
 		return await stub.fetch(forwardedRequest);
@@ -172,4 +188,39 @@ export async function handleSpacePreview(
 		return createPreviewAccessResponse(401, 'Access denied', 'This preview link is invalid or has expired.');
 	}
 	return createPreviewAccessResponse(401, 'Access denied', 'This preview link is missing an access token.');
+}
+
+/**
+ * A preview served at the root of its own subdomain (an embedded site's
+ * `<deploymentName>-preview` host). The token names the space and branch and
+ * is bound to this host. Returns null when the request carries no token for
+ * this host, so the caller can serve the host as a deployed app instead.
+ */
+export async function handleHostPreview(request: Request, env: Env, host: string): Promise<Response | null> {
+	const url = new URL(request.url);
+
+	const cookieToken = readPreviewCookie(request);
+	if (cookieToken) {
+		const claims = await verifyHostPreviewToken(env, cookieToken, host);
+		if (claims && (await isPreviewVersionCurrent(env, claims.spaceName, claims))) {
+			const limited = await enforcePreviewRateLimit(env, cookieToken, request);
+			if (limited) return limited;
+			return forwardToSpacePreview(request, env, claims.spaceName, { branch: claims.branch });
+		}
+	}
+
+	const queryToken = url.searchParams.get('t') ?? '';
+	if (!queryToken) return null;
+	const claims = await verifyHostPreviewToken(env, queryToken, host);
+	if (!claims || !(await isPreviewVersionCurrent(env, claims.spaceName, claims))) return null;
+	const limited = await enforcePreviewRateLimit(env, queryToken, request);
+	if (limited) return limited;
+	const response = await forwardToSpacePreview(request, env, claims.spaceName, { branch: claims.branch });
+	if (isWebSocketResponse(response)) return response;
+	const withCookie = new Response(response.body, response);
+	withCookie.headers.append(
+		'Set-Cookie',
+		buildHostPreviewCookie({ token: queryToken, secure: url.protocol === 'https:', ttlSeconds: EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS }),
+	);
+	return withCookie;
 }

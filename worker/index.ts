@@ -4,13 +4,15 @@ import { createApp } from './app';
 // import * as Sentry from '@sentry/cloudflare';
 // import { sentryOptions } from './observability/sentry';
 import { DORateLimitStore as BaseDORateLimitStore } from './services/rate-limit/DORateLimitStore';
-import { getPreviewDomain, getProtocolForHost, isSeparatePreviewDomain } from './utils/urls';
+import { getPreviewDomain, getProtocolForHost, isSeparatePreviewDomain, looksLikeEmbeddedPreviewHost } from './utils/urls';
 import { proxyToAiGateway } from './services/aigateway-proxy/controller';
 import { isOriginAllowed } from './config/security';
 import { isDev } from './utils/envs';
 import { proxyToSandbox } from './services/sandbox/request-handler';
 import { handleGitProtocolRequest, isGitProtocolRequest } from './api/handlers/git-protocol';
 import {
+	createPreviewAccessResponse,
+	handleHostPreview,
 	handleSpacePreview,
 	matchSpacePreviewParams,
 } from './api/handlers/space-preview';
@@ -85,6 +87,9 @@ function withPreviewCorsHeaders(env: Env, request: Request, response: Response):
     });
 }
 
+/** `b-<agent uuid>-<token>`: a file the agent serves to its own browser. */
+const BROWSER_FILE_LABEL = /^b-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-.+$/;
+
 /** True when `hostname` matches the platform's own preview-subdomain pattern (`<deploymentId>.<previewDomain>` or `*.localhost`), as opposed to a per-app custom domain. */
 function isPreviewSubdomainHostname(hostname: string, env: Env): boolean {
 	const previewDomain = getPreviewDomain(env);
@@ -138,26 +143,31 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 	// Pattern: b-{agentid}-{token}.{previewDomain}. Only applies on the
 	// platform's own preview subdomains — a custom domain's first label could
 	// coincidentally start with "b-" and must not be treated as this pattern.
+	// The agent id is a UUID, so a deployed app whose name merely starts with
+	// "b-" (a business called "B and Co", say) is still served as that app.
 	if (isPreviewSubdomainHostname(hostname, env)) {
 		const subdomain = hostname.split('.')[0];
-		if (subdomain.startsWith('b-')) {
-			// Extract agentId and token from subdomain
-			const withoutPrefix = subdomain.substring(2); // Remove 'b-'
-			const lastHyphenIndex = withoutPrefix.lastIndexOf('-');
+		const browserFile = BROWSER_FILE_LABEL.exec(subdomain);
+		if (browserFile) {
+			const agentId = browserFile[1];
+			logger.info(`Agent browser file serving request for agent: ${agentId}`);
 
-			if (lastHyphenIndex !== -1) {
-				const agentId = withoutPrefix.substring(0, lastHyphenIndex);
-				logger.info(`Agent browser file serving request for agent: ${agentId}`);
-
-				try {
-					const agentStub = await getAgentStub(env, agentId);
-					return await agentStub.handleBrowserFileServing(request);
-				} catch (error: any) {
-					logger.error(`Error forwarding to agent: ${error.message}`);
-					return new Response('Agent not found', { status: 404 });
-				}
+			try {
+				const agentStub = await getAgentStub(env, agentId);
+				return await agentStub.handleBrowserFileServing(request);
+			} catch (error: any) {
+				logger.error(`Error forwarding to agent: ${error.message}`);
+				return new Response('Agent not found', { status: 404 });
 			}
 		}
+	}
+
+	// An embedded site's preview, served at the root of its own subdomain. Only
+	// a request carrying a preview token minted for this host is served here;
+	// anything else falls through to the deployed app of that name, if any.
+	if (isPreviewSubdomainHostname(hostname, env)) {
+		const preview = await handleHostPreview(request, env, hostname);
+		if (preview) return withPreviewCorsHeaders(env, request, preview);
 	}
 
 	// 1. Attempt to proxy to a live development sandbox.
@@ -206,6 +216,9 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 	// never the raw request hostname.
 	const resolved = await resolveAppDeployment(hostname, env);
 	if (!resolved) {
+		if (looksLikeEmbeddedPreviewHost(hostname)) {
+			return createPreviewAccessResponse(401, 'Preview link expired', 'This preview link is invalid or has expired. Open the latest link from the place you got it.');
+		}
 		// Fail closed: no owning app row for this hostname/deployment id.
 		logger.warn(`No app found for host '${hostname}', refusing dispatch.`);
 		return new Response('This application is not currently available.', { status: 404 });
