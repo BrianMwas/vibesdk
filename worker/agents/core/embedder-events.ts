@@ -90,11 +90,17 @@ export function toEmbedderEvent(type: string, data: Record<string, unknown> | un
 
 /**
  * The event a broadcast sends the embedder during a build. A build that ended
- * on a question is waiting for its answer, not finished, so it says nothing.
+ * on a question is waiting for its answer, not finished, so it says nothing;
+ * nor does one that stopped on an error, which the embedder has already heard.
  */
-export function forwardedEvent(type: string, data: Record<string, unknown> | undefined, askedThisBuild: boolean): EmbedderEvent | null {
+export function forwardedEvent(
+	type: string,
+	data: Record<string, unknown> | undefined,
+	askedThisBuild: boolean,
+	failedThisBuild = false,
+): EmbedderEvent | null {
 	const event = toEmbedderEvent(type, data);
-	return event?.type === 'build.finished' && askedThisBuild ? null : event;
+	return event?.type === 'build.finished' && (askedThisBuild || failedThisBuild) ? null : event;
 }
 
 /** The suggested answers a question carries: two to four, or none. */

@@ -193,11 +193,18 @@ export class ThinkCodingBehavior
 	 */
 	private askedThisBuild = false;
 
+	/** Set when the current build stopped on an error: it is not finished, and nothing is ready to publish. */
+	private failedThisBuild = false;
+
 	/** Everything the UI is told also reaches an embedding platform's callback, translated. */
 	public override broadcast<T extends WebSocketMessageType>(msg: T, data?: WebSocketMessageData<T>): void {
 		super.broadcast(msg, data);
-		if (msg === WebSocketMessageResponses.GENERATION_STARTED) this.askedThisBuild = false;
-		const event = forwardedEvent(msg, data as Record<string, unknown> | undefined, this.askedThisBuild);
+		if (msg === WebSocketMessageResponses.GENERATION_STARTED) {
+			this.askedThisBuild = false;
+			this.failedThisBuild = false;
+		}
+		if (msg === WebSocketMessageResponses.ERROR && this.isCodeGenerating()) this.failedThisBuild = true;
+		const event = forwardedEvent(msg, data as Record<string, unknown> | undefined, this.askedThisBuild, this.failedThisBuild);
 		if (event) this.notifyEmbedder(event);
 	}
 

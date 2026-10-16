@@ -34,6 +34,11 @@ describe('forwardedEvent', () => {
 		expect(forwardedEvent('generation_complete', {}, false)).toEqual({ type: 'build.finished' });
 		expect(forwardedEvent('file_generated', { file: { filePath: 'a.tsx' } }, true)).toEqual({ type: 'file.written', path: 'a.tsx' });
 	});
+
+	it('says nothing at the end of a build that stopped on an error', () => {
+		expect(forwardedEvent('generation_complete', {}, false, true)).toBeNull();
+		expect(forwardedEvent('error', { error: 'model unavailable' }, false, true)).toEqual({ type: 'error', error: 'model unavailable' });
+	});
 });
 
 describe('toQuestionEvent', () => {

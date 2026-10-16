@@ -187,7 +187,10 @@ describe('handleHostPreview', () => {
 		expect(capture.lastRequest!.headers.get(PREVIEW_MOUNT_HEADER)).toBe('root');
 		const setCookie = res?.headers.get('Set-Cookie') ?? '';
 		expect(setCookie).toContain('Path=/;');
+		// Sent inside the embedder's iframe, where a Lax cookie never is.
+		expect(setCookie).toContain('SameSite=None');
 		expect(setCookie).toContain('Secure');
+		expect(setCookie).toContain('Partitioned');
 	});
 
 	it('accepts the cookie on later requests', async () => {

@@ -119,7 +119,9 @@ export function buildPreviewCookie(opts: {
 
 /**
  * The cookie for a preview served at the root of its own host: host-only and
- * site-wide, since the host serves nothing but this one preview.
+ * site-wide, since the host serves nothing but this one preview. The embedder
+ * shows the preview in an iframe on its own site, where a Lax cookie is never
+ * sent, so over https it is `SameSite=None; Secure; Partitioned`.
  */
 export function buildHostPreviewCookie(opts: { token: string; secure: boolean; ttlSeconds?: number }): string {
 	const parts = [
@@ -127,9 +129,8 @@ export function buildHostPreviewCookie(opts: { token: string; secure: boolean; t
 		'Path=/',
 		`Max-Age=${opts.ttlSeconds ?? SPACE_PREVIEW_TOKEN_TTL_SECONDS}`,
 		'HttpOnly',
-		'SameSite=Lax',
 	];
-	if (opts.secure) parts.push('Secure');
+	parts.push(...(opts.secure ? ['SameSite=None', 'Secure', 'Partitioned'] : ['SameSite=Lax']));
 	return parts.join('; ');
 }
 
