@@ -11,6 +11,7 @@ export const DEFAULT_THINK_MODEL_ID = 'google-ai-studio/gemini-3.6-flash';
  * `config.types.ts`.
  */
 const KNOWN_THINK_MODELS: { match: string; name: string; creditCost: number; contextSize: number }[] = [
+	{ match: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', creditCost: 8, contextSize: 1_000_000 },
 	{ match: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', creditCost: 2, contextSize: 1_048_576 },
 	{ match: 'kimi-k3', name: 'Kimi K3', creditCost: 12, contextSize: 1_048_576 },
 	{ match: 'gpt-5.2', name: 'GPT-5.2', creditCost: 7, contextSize: 400_000 },
@@ -25,10 +26,34 @@ const KNOWN_THINK_MODELS: { match: string; name: string; creditCost: number; con
 /** Used for an id we have no entry for: priced high so rate limits stay conservative. */
 const UNKNOWN_MODEL = { creditCost: 12, contextSize: 131_072 };
 
+/**
+ * How the model is reached. GPT-6 models call functions only through the
+ * Responses API (Chat Completions refuses tools for them), so they go to the
+ * gateway's native OpenAI endpoint; everything else uses the OpenAI-compatible
+ * `/compat` Chat Completions endpoint.
+ */
+export type ThinkApi = 'chat' | 'responses';
+
+export const THINK_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ThinkReasoningEffort = (typeof THINK_REASONING_EFFORTS)[number];
+
 export interface ThinkModel {
 	/** Sent as `model` to the gateway's OpenAI-compatible endpoint: `<provider>/<model>`. */
 	id: string;
 	config: AIModelConfig;
+	api: ThinkApi;
+	/** `THINK_REASONING_EFFORT`, when set to a value the models accept. */
+	reasoningEffort?: ThinkReasoningEffort;
+}
+
+/** Models that call functions only through the Responses API. */
+function needsResponsesApi(id: string): boolean {
+	return /(^|\/)gpt-6/.test(id.toLowerCase());
+}
+
+function readEffort(value: string | undefined): ThinkReasoningEffort | undefined {
+	const effort = value?.trim().toLowerCase();
+	return (THINK_REASONING_EFFORTS as readonly string[]).includes(effort ?? '') ? (effort as ThinkReasoningEffort) : undefined;
 }
 
 /**
@@ -36,16 +61,20 @@ export interface ThinkModel {
  * as a Worker variable) to a gateway model id such as
  * `workers-ai/@cf/moonshotai/kimi-k3` or `openrouter/moonshotai/kimi-k3` to try
  * another model without a code change. The provider is the id's first segment
- * and decides which `<PROVIDER>_API_KEY` is used.
+ * and decides which `<PROVIDER>_API_KEY` is used. `THINK_REASONING_EFFORT`
+ * (low, medium, high, xhigh or max) sets how hard a reasoning model thinks.
  */
-export function resolveThinkModel(env: { THINK_MODEL_ID?: string }): ThinkModel {
+export function resolveThinkModel(env: { THINK_MODEL_ID?: string; THINK_REASONING_EFFORT?: string }): ThinkModel {
 	const id = env.THINK_MODEL_ID?.trim() || DEFAULT_THINK_MODEL_ID;
 	const slash = id.indexOf('/');
 	const provider = slash > 0 ? id.slice(0, slash) : 'google-ai-studio';
 	const lower = id.toLowerCase();
 	const known = KNOWN_THINK_MODELS.find((model) => lower.includes(model.match));
+	const reasoningEffort = readEffort(env.THINK_REASONING_EFFORT);
 	return {
 		id,
+		api: needsResponsesApi(id) ? 'responses' : 'chat',
+		...(reasoningEffort ? { reasoningEffort } : {}),
 		config: {
 			name: known?.name ?? id,
 			size: ModelSize.REGULAR,
@@ -54,4 +83,28 @@ export function resolveThinkModel(env: { THINK_MODEL_ID?: string }): ThinkModel 
 			contextSize: known?.contextSize ?? UNKNOWN_MODEL.contextSize,
 		},
 	};
+}
+
+/**
+ * Adds the configured reasoning effort to an outgoing request, unless the
+ * request already names one: `reasoning.effort` on the Responses API,
+ * `reasoning_effort` on Chat Completions.
+ */
+export function withReasoningEffort(bodyText: string, api: ThinkApi, effort: ThinkReasoningEffort | undefined): string {
+	if (!effort) return bodyText;
+	let json: Record<string, unknown>;
+	try {
+		json = JSON.parse(bodyText) as Record<string, unknown>;
+	} catch {
+		return bodyText;
+	}
+	if (api === 'responses') {
+		const reasoning = (json.reasoning as Record<string, unknown> | undefined) ?? {};
+		if (reasoning.effort) return bodyText;
+		json.reasoning = { ...reasoning, effort };
+	} else {
+		if (json.reasoning_effort) return bodyText;
+		json.reasoning_effort = effort;
+	}
+	return JSON.stringify(json);
 }

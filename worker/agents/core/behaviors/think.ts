@@ -17,7 +17,9 @@ import { deriveShortTitle } from '../../utils/titleGenerator';
 import { PreviewType, TemplateDetails } from 'worker/services/sandbox/sandboxTypes';
 import {
 	buildSpacePreviewPath,
+	embeddedPreviewLabel,
 	getPreviewDomain,
+	getProtocolForHost,
 	isSeparatePreviewDomain,
 	resolvePreviewHost,
 } from 'worker/utils/urls';
@@ -350,7 +352,9 @@ export class ThinkCodingBehavior
 		const inf = this.getInferenceContext();
 		const userId = this.state.metadata.userId;
 
-		const { id: modelName, config: aiModelConfig } = resolveThinkModel(this.env);
+		const { id: modelId, config: aiModelConfig, api, reasoningEffort } = resolveThinkModel(this.env);
+		// The native OpenAI endpoint takes the bare model name; `/compat` takes `<provider>/<model>`.
+		const modelName = api === 'responses' ? modelId.replace(/^openai\//, '') : modelId;
 
 		let conf: { baseURL: string; apiKey: string; defaultHeaders?: Record<string, string> };
 		try {
@@ -395,7 +399,10 @@ export class ThinkCodingBehavior
 		};
 		let baseURL = conf.baseURL;
 		if (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_AI_GATEWAY) {
-			baseURL = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.CLOUDFLARE_AI_GATEWAY}/compat`;
+			// The Responses API is reached through the gateway's native OpenAI route.
+			baseURL = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.CLOUDFLARE_AI_GATEWAY}/${api === 'responses' ? 'openai' : 'compat'}`;
+		} else if (api === 'responses') {
+			baseURL = baseURL.replace(/\/compat\/?$/, '/openai');
 		}
 
 		const config: ThinkAgentConfig = {
@@ -407,6 +414,8 @@ export class ThinkCodingBehavior
 				contextSize: aiModelConfig.contextSize,
 				headers: Object.keys(headers).length > 0 ? headers : undefined,
 				useStoredKeys: usesStoredKeys,
+				api,
+				...(reasoningEffort ? { reasoningEffort } : {}),
 			},
 			systemPrompt: this.buildSystemPrompt(modelName, aiModelConfig.provider),
 			previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
@@ -513,6 +522,15 @@ export class ThinkCodingBehavior
 		return `https://${host}`;
 	}
 
+	/** `<deploymentName>-preview.<previewDomain>` for an embedded site with a fixed name, outside local dev. */
+	private embeddedPreviewHost(): string | null {
+		const deploymentName = this.state.embedderContext?.deploymentName;
+		if (!deploymentName || isDev(this.env)) return null;
+		const label = embeddedPreviewLabel(deploymentName);
+		const domain = getPreviewDomain(this.env);
+		return label && domain ? `${label}.${domain}` : null;
+	}
+
 	public async getBrowserPreviewURL(previewVersionOverride?: number): Promise<string> {
 		const spaceName = this.getAgentId();
 		const branch = this.state.currentBranch || 'main';
@@ -525,10 +543,21 @@ export class ThinkCodingBehavior
 		// visibility toggle (which bumps it) invalidates this token.
 		const previewVersion = previewVersionOverride ??
 			(await new AppService(this.env).getPreviewVersion(spaceName)) ?? 0;
-		// An embedder keeps the link to show its owner later, so it outlives a session's half hour.
+		const claims = { spaceName, branch, userId: this.state.metadata.userId, previewVersion };
+
+		// An embedded site is previewed at the root of its own subdomain, beside
+		// the address it publishes to, so its router sees the paths it was written
+		// for. The embedder keeps the link to show its owner later, so it outlives
+		// a session's half hour.
+		const host = this.embeddedPreviewHost();
+		if (host) {
+			const token = await signSpacePreviewToken(this.env, { ...claims, host }, EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS);
+			return `${getProtocolForHost(host)}://${host}/?t=${encodeURIComponent(token)}`;
+		}
+
 		const token = await signSpacePreviewToken(
 			this.env,
-			{ spaceName, branch, userId: this.state.metadata.userId, previewVersion },
+			claims,
 			this.state.embedderContext ? EMBEDDED_PREVIEW_TOKEN_TTL_SECONDS : undefined,
 		);
 		return `${previewBaseUrl}?t=${encodeURIComponent(token)}`;

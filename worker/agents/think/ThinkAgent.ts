@@ -28,7 +28,7 @@ import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
 import type { RateLimitSettings } from '../../services/rate-limit/config';
-import { resolveThinkModel } from './model-config';
+import { resolveThinkModel, withReasoningEffort, type ThinkApi, type ThinkReasoningEffort } from './model-config';
 import {
 	ReasoningReplay,
 	collectReasoning,
@@ -66,6 +66,10 @@ export interface ThinkAgentConfig {
 		 * rejects it. `getModel()` strips `Authorization` when this is set.
 		 */
 		useStoredKeys?: boolean;
+		/** `responses` for models that call functions only through the Responses API (`model-config.ts`). */
+		api?: ThinkApi;
+		/** How hard a reasoning model thinks, added to every request. */
+		reasoningEffort?: ThinkReasoningEffort;
 	};
 	/** Builder system prompt (assembled host-side; falls back to a default). */
 	systemPrompt?: string;
@@ -272,11 +276,13 @@ export class ThinkAgent extends Think<Env> {
 			if (model.useStoredKeys) headers.delete('authorization');
 			let body = init?.body;
 			if (typeof body === 'string') {
+				body = withReasoningEffort(body, model.api ?? 'chat', model.reasoningEffort);
+				if (model.api === 'responses') return fetch(input as RequestInfo, { ...(init ?? {}), headers, body });
 				body = this.injectThoughtSignatures(body);
 				if (replayReasoning) body = this.injectReasoning(body);
 			}
 			const res = await fetch(input as RequestInfo, { ...(init ?? {}), headers, body });
-			if (!res.body) return res;
+			if (!res.body || model.api === 'responses') return res;
 			const outHeaders = new Headers(res.headers);
 			// Body length/encoding change after transforming the stream.
 			outHeaders.delete('content-length');
@@ -300,7 +306,8 @@ export class ThinkAgent extends Think<Env> {
 		// default Responses API (`/compat/responses`). VibeSDK's AI Gateway is
 		// exercised via chat-completions everywhere else; the responses path on
 		// the gateway rejects auth (401 AiGatewayError) for these models.
-		return provider.chat(model.modelName);
+		// GPT-6 models call functions only through the Responses API, on the gateway's native OpenAI route.
+		return model.api === 'responses' ? provider.responses(model.modelName) : provider.chat(model.modelName);
 	}
 
 	/**
