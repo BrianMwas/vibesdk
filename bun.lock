@@ -5,6 +5,7 @@
     "": {
       "name": "vibesdk",
       "dependencies": {
+        "@ai-sdk/anthropic": "^3.0.78",
         "@ai-sdk/openai": "^3.0.68",
         "@ashishkumar472/cf-git": "1.0.5",
         "@babel/generator": "^7.28.5",

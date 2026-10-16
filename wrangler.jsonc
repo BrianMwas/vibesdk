@@ -237,7 +237,7 @@
         "DEV_BROWSER_PREVIEW_ORIGIN": "http://localhost:5173",
         "CUSTOM_PREVIEW_DOMAIN": "speek.site",
         "CUSTOM_DOMAIN": "build.speek.site",
-        "THINK_MODEL_ID": "openai/gpt-6.1-sol",
+        "THINK_MODEL_ID": "anthropic/claude-sonnet-5-5",
         "THINK_REASONING_EFFORT": "medium"
     },
 	"workers_dev": false,

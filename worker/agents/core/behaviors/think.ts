@@ -353,8 +353,9 @@ export class ThinkCodingBehavior
 		const userId = this.state.metadata.userId;
 
 		const { id: modelId, config: aiModelConfig, api, reasoningEffort } = resolveThinkModel(this.env);
-		// The native OpenAI endpoint takes the bare model name; `/compat` takes `<provider>/<model>`.
-		const modelName = api === 'responses' ? modelId.replace(/^openai\//, '') : modelId;
+		// The native routes take the bare model name; `/compat` takes `<provider>/<model>`.
+		const modelName = api === 'chat' ? modelId : modelId.replace(/^(openai|anthropic)\//, '');
+		const route = api === 'responses' ? 'openai' : api === 'anthropic' ? 'anthropic/v1' : 'compat';
 
 		let conf: { baseURL: string; apiKey: string; defaultHeaders?: Record<string, string> };
 		try {
@@ -399,10 +400,9 @@ export class ThinkCodingBehavior
 		};
 		let baseURL = conf.baseURL;
 		if (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_AI_GATEWAY) {
-			// The Responses API is reached through the gateway's native OpenAI route.
-			baseURL = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.CLOUDFLARE_AI_GATEWAY}/${api === 'responses' ? 'openai' : 'compat'}`;
-		} else if (api === 'responses') {
-			baseURL = baseURL.replace(/\/compat\/?$/, '/openai');
+			baseURL = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.CLOUDFLARE_AI_GATEWAY}/${route}`;
+		} else if (api !== 'chat') {
+			baseURL = baseURL.replace(/\/compat\/?$/, `/${route}`);
 		}
 
 		const config: ThinkAgentConfig = {

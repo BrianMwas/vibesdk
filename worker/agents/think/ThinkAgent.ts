@@ -1,6 +1,7 @@
 import { Think } from '@cloudflare/think';
 import type { PrepareStepContext, StepConfig, Session, TurnContext, TurnConfig } from '@cloudflare/think';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import type { LanguageModel, ToolSet } from 'ai';
 import {
 	createReadTool,
@@ -28,7 +29,7 @@ import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
 import type { RateLimitSettings } from '../../services/rate-limit/config';
-import { resolveThinkModel, withReasoningEffort, type ThinkApi, type ThinkReasoningEffort } from './model-config';
+import { resolveThinkModel, withRequestDefaults, type ThinkApi, type ThinkReasoningEffort } from './model-config';
 import {
 	ReasoningReplay,
 	collectReasoning,
@@ -66,7 +67,7 @@ export interface ThinkAgentConfig {
 		 * rejects it. `getModel()` strips `Authorization` when this is set.
 		 */
 		useStoredKeys?: boolean;
-		/** `responses` for models that call functions only through the Responses API (`model-config.ts`). */
+		/** `responses` for GPT-6, `anthropic` for Claude: the gateway's native routes (`model-config.ts`). */
 		api?: ThinkApi;
 		/** How hard a reasoning model thinks, added to every request. */
 		reasoningEffort?: ThinkReasoningEffort;
@@ -273,16 +274,21 @@ export class ThinkAgent extends Think<Env> {
 		// (4) for Kimi, round-trip `reasoning_content` the same way.
 		const gatewayFetch: typeof fetch = async (input, init) => {
 			const headers = new Headers(init?.headers);
-			if (model.useStoredKeys) headers.delete('authorization');
+			if (model.useStoredKeys) {
+				headers.delete('authorization');
+				headers.delete('x-api-key');
+			}
+			// The native routes speak their provider's own format: only the chat route needs the stream fixes below.
+			const native = model.api === 'responses' || model.api === 'anthropic';
 			let body = init?.body;
 			if (typeof body === 'string') {
-				body = withReasoningEffort(body, model.api ?? 'chat', model.reasoningEffort);
-				if (model.api === 'responses') return fetch(input as RequestInfo, { ...(init ?? {}), headers, body });
+				body = withRequestDefaults(body, model.api ?? 'chat', model.reasoningEffort);
+				if (native) return fetch(input as RequestInfo, { ...(init ?? {}), headers, body });
 				body = this.injectThoughtSignatures(body);
 				if (replayReasoning) body = this.injectReasoning(body);
 			}
 			const res = await fetch(input as RequestInfo, { ...(init ?? {}), headers, body });
-			if (!res.body || model.api === 'responses') return res;
+			if (!res.body || native) return res;
 			const outHeaders = new Headers(res.headers);
 			// Body length/encoding change after transforming the stream.
 			outHeaders.delete('content-length');
@@ -296,6 +302,10 @@ export class ThinkAgent extends Think<Env> {
 				{ status: res.status, statusText: res.statusText, headers: outHeaders },
 			);
 		};
+		if (model.api === 'anthropic') {
+			// Claude's thinking blocks go back unchanged between tool calls, which only its own Messages format carries.
+			return createAnthropic({ baseURL: model.baseURL, apiKey: model.apiKey, headers: model.headers, fetch: gatewayFetch })(model.modelName);
+		}
 		const provider = createOpenAI({
 			baseURL: model.baseURL,
 			apiKey: model.apiKey,

@@ -12,6 +12,7 @@ export const DEFAULT_THINK_MODEL_ID = 'google-ai-studio/gemini-3.6-flash';
  */
 const KNOWN_THINK_MODELS: { match: string; name: string; creditCost: number; contextSize: number }[] = [
 	{ match: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', creditCost: 8, contextSize: 1_000_000 },
+	{ match: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', creditCost: 8, contextSize: 1_000_000 },
 	{ match: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', creditCost: 2, contextSize: 1_048_576 },
 	{ match: 'kimi-k3', name: 'Kimi K3', creditCost: 12, contextSize: 1_048_576 },
 	{ match: 'gpt-5.2', name: 'GPT-5.2', creditCost: 7, contextSize: 400_000 },
@@ -28,11 +29,18 @@ const UNKNOWN_MODEL = { creditCost: 12, contextSize: 131_072 };
 
 /**
  * How the model is reached. GPT-6 models call functions only through the
- * Responses API (Chat Completions refuses tools for them), so they go to the
- * gateway's native OpenAI endpoint; everything else uses the OpenAI-compatible
- * `/compat` Chat Completions endpoint.
+ * Responses API (Chat Completions refuses tools for them), and Claude passes
+ * its thinking blocks back between tool calls, which the OpenAI message shape
+ * has no place for, so both go to the gateway's native provider routes.
+ * Everything else uses the OpenAI-compatible `/compat` Chat Completions route.
  */
-export type ThinkApi = 'chat' | 'responses';
+export type ThinkApi = 'chat' | 'responses' | 'anthropic';
+
+/**
+ * The output ceiling for a Claude turn. The AI SDK caps models it doesn't know
+ * yet at 4,096 tokens, too few for a turn that writes whole files.
+ */
+export const ANTHROPIC_MAX_OUTPUT_TOKENS = 64_000;
 
 export const THINK_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkReasoningEffort = (typeof THINK_REASONING_EFFORTS)[number];
@@ -46,9 +54,10 @@ export interface ThinkModel {
 	reasoningEffort?: ThinkReasoningEffort;
 }
 
-/** Models that call functions only through the Responses API. */
-function needsResponsesApi(id: string): boolean {
-	return /(^|\/)gpt-6/.test(id.toLowerCase());
+function apiFor(id: string): ThinkApi {
+	const lower = id.toLowerCase();
+	if (lower.startsWith('anthropic/')) return 'anthropic';
+	return /(^|\/)gpt-6/.test(lower) ? 'responses' : 'chat';
 }
 
 function readEffort(value: string | undefined): ThinkReasoningEffort | undefined {
@@ -73,7 +82,7 @@ export function resolveThinkModel(env: { THINK_MODEL_ID?: string; THINK_REASONIN
 	const reasoningEffort = readEffort(env.THINK_REASONING_EFFORT);
 	return {
 		id,
-		api: needsResponsesApi(id) ? 'responses' : 'chat',
+		api: apiFor(id),
 		...(reasoningEffort ? { reasoningEffort } : {}),
 		config: {
 			name: known?.name ?? id,
@@ -86,24 +95,27 @@ export function resolveThinkModel(env: { THINK_MODEL_ID?: string; THINK_REASONIN
 }
 
 /**
- * Adds the configured reasoning effort to an outgoing request, unless the
- * request already names one: `reasoning.effort` on the Responses API,
- * `reasoning_effort` on Chat Completions.
+ * Adds what the model needs to every outgoing request, unless the request
+ * already says: the configured reasoning effort (`reasoning.effort` on the
+ * Responses API, `reasoning_effort` on Chat Completions, `output_config.effort`
+ * on Anthropic), and for Claude an output ceiling large enough for a file.
  */
-export function withReasoningEffort(bodyText: string, api: ThinkApi, effort: ThinkReasoningEffort | undefined): string {
-	if (!effort) return bodyText;
+export function withRequestDefaults(bodyText: string, api: ThinkApi, effort: ThinkReasoningEffort | undefined): string {
+	if (!effort && api !== 'anthropic') return bodyText;
 	let json: Record<string, unknown>;
 	try {
 		json = JSON.parse(bodyText) as Record<string, unknown>;
 	} catch {
 		return bodyText;
 	}
-	if (api === 'responses') {
+	if (api === 'anthropic') {
+		if (typeof json.max_tokens !== 'number' || json.max_tokens < ANTHROPIC_MAX_OUTPUT_TOKENS) json.max_tokens = ANTHROPIC_MAX_OUTPUT_TOKENS;
+		const outputConfig = (json.output_config as Record<string, unknown> | undefined) ?? {};
+		if (effort && !outputConfig.effort) json.output_config = { ...outputConfig, effort };
+	} else if (api === 'responses') {
 		const reasoning = (json.reasoning as Record<string, unknown> | undefined) ?? {};
-		if (reasoning.effort) return bodyText;
-		json.reasoning = { ...reasoning, effort };
-	} else {
-		if (json.reasoning_effort) return bodyText;
+		if (!reasoning.effort) json.reasoning = { ...reasoning, effort };
+	} else if (!json.reasoning_effort) {
 		json.reasoning_effort = effort;
 	}
 	return JSON.stringify(json);
