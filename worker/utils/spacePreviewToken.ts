@@ -19,6 +19,11 @@ export interface SpacePreviewClaims {
 	 * version) revokes this token.
 	 */
 	previewVersion: number;
+	/**
+	 * The host a preview served at the root of its own subdomain opens on
+	 * (`<deploymentName>-preview.<previewDomain>`). Absent for the path preview.
+	 */
+	host?: string;
 }
 
 export async function signSpacePreviewToken(
@@ -30,18 +35,11 @@ export async function signSpacePreviewToken(
 	return jwt.signPayload({ ...claims, purpose: PREVIEW_PURPOSE }, ttlSeconds);
 }
 
-export async function verifySpacePreviewToken(
-	env: { JWT_SECRET: string },
-	token: string,
-	expectedSpaceName: string,
-	expectedBranch: string,
-): Promise<SpacePreviewClaims | null> {
-	const jwt = JWTUtils.getInstance(env);
-	const payload = await jwt.verifyPayload(token);
+function previewClaims(payload: Record<string, unknown> | null): SpacePreviewClaims | null {
 	if (!payload) return null;
 	if (payload.purpose !== PREVIEW_PURPOSE) return null;
-	if (typeof payload.spaceName !== 'string' || payload.spaceName !== expectedSpaceName) return null;
-	if (typeof payload.branch !== 'string' || payload.branch !== expectedBranch) return null;
+	if (typeof payload.spaceName !== 'string' || payload.spaceName.trim() === '') return null;
+	if (typeof payload.branch !== 'string' || payload.branch.trim() === '') return null;
 	if (typeof payload.userId !== 'string' || payload.userId.trim() === '') return null;
 	if (typeof payload.previewVersion !== 'number' || !Number.isFinite(payload.previewVersion)) return null;
 
@@ -50,7 +48,34 @@ export async function verifySpacePreviewToken(
 		branch: payload.branch,
 		userId: payload.userId,
 		previewVersion: payload.previewVersion,
+		...(typeof payload.host === 'string' ? { host: payload.host } : {}),
 	};
+}
+
+export async function verifySpacePreviewToken(
+	env: { JWT_SECRET: string },
+	token: string,
+	expectedSpaceName: string,
+	expectedBranch: string,
+): Promise<SpacePreviewClaims | null> {
+	const claims = previewClaims(await JWTUtils.getInstance(env).verifyPayload(token));
+	if (!claims || claims.spaceName !== expectedSpaceName || claims.branch !== expectedBranch) return null;
+	return claims;
+}
+
+/**
+ * Verify a token for a preview served at the root of its own host. The space
+ * and branch come from the token, so it must have been minted for exactly this
+ * host: a token for one site never opens another site's preview host.
+ */
+export async function verifyHostPreviewToken(
+	env: { JWT_SECRET: string },
+	token: string,
+	host: string,
+): Promise<SpacePreviewClaims | null> {
+	const claims = previewClaims(await JWTUtils.getInstance(env).verifyPayload(token));
+	if (!claims?.host || claims.host.toLowerCase() !== host.toLowerCase()) return null;
+	return claims;
 }
 
 /**
@@ -89,6 +114,22 @@ export function buildPreviewCookie(opts: {
 		parts.push('SameSite=Lax');
 		if (secure) parts.push('Secure');
 	}
+	return parts.join('; ');
+}
+
+/**
+ * The cookie for a preview served at the root of its own host: host-only and
+ * site-wide, since the host serves nothing but this one preview.
+ */
+export function buildHostPreviewCookie(opts: { token: string; secure: boolean; ttlSeconds?: number }): string {
+	const parts = [
+		`${SPACE_PREVIEW_COOKIE_NAME}=${opts.token}`,
+		'Path=/',
+		`Max-Age=${opts.ttlSeconds ?? SPACE_PREVIEW_TOKEN_TTL_SECONDS}`,
+		'HttpOnly',
+		'SameSite=Lax',
+	];
+	if (opts.secure) parts.push('Secure');
 	return parts.join('; ');
 }
 
